@@ -47,9 +47,9 @@
 // CUSTOM_TOPOLOGY           - Array defining neurons per layer, with the exception of
 //                             CUSTOM_TOPOLOGY[0], which specifies the number of inputs.
 // NUM_TEST_IMAGES           - Number of stimulus images for simulation
-// VERIFY_PYTHON             - Cross-check SV results against Python model 
+// VERIFY_MODEL              - Cross-check SV results against Python model 
 //                             (only applicable to USE_CUSTOM_TOPOLOGY=1'b0)
-// BASE_DIR                  - Path to Python reference/training data (must be set relative to
+// BASE_DIR                  - Path to Python model data and test vectors (must be set relative to
 //                             your simulator's working directory)
 // TOGGLE_DATA_OUT_READY     - Randomly toggles data_out_ready to simulate back-pressure. Must be enabled
 //                             to fully pass tests for contest. Disable to measure throughput and latency.
@@ -84,18 +84,18 @@
 
 module bnn_fcc_tb #(
     // Testbench configuration
-    parameter int      USE_CUSTOM_TOPOLOGY                           = 1'b1,
-    parameter int      CUSTOM_LAYERS                                 = 4,
-    parameter int      CUSTOM_TOPOLOGY               [CUSTOM_LAYERS] = '{8, 8, 8, 8},
-    parameter int      NUM_TEST_IMAGES                               = 10,
-    parameter bit      VERIFY_SV_MODEL_AGAINST_PYTHON                = 1,
-    parameter string   BASE_DIR                                      = "../python",
-    parameter bit      TOGGLE_DATA_OUT_READY                         = 1'b0,
-    parameter real     CONFIG_VALID_PROBABILITY                      = 1.0,
-    parameter real     DATA_IN_VALID_PROBABILITY                     = 1.0,
-    parameter realtime TIMEOUT                                       = 10ms,
-    parameter realtime CLK_PERIOD                                    = 10ns,
-    parameter bit      DEBUG                                         = 1'b1,
+    parameter int      USE_CUSTOM_TOPOLOGY                      = 1'b0,
+    parameter int      CUSTOM_LAYERS                            = 4,
+    parameter int      CUSTOM_TOPOLOGY          [CUSTOM_LAYERS] = '{8, 8, 8, 8},
+    parameter int      NUM_TEST_IMAGES                          = 50,
+    parameter bit      VERIFY_MODEL                             = 1,
+    parameter string   BASE_DIR                                 = "../python",
+    parameter bit      TOGGLE_DATA_OUT_READY                    = 1'b1,
+    parameter real     CONFIG_VALID_PROBABILITY                 = 0.8,
+    parameter real     DATA_IN_VALID_PROBABILITY                = 0.8,
+    parameter realtime TIMEOUT                                  = 10ms,
+    parameter realtime CLK_PERIOD                               = 10ns,
+    parameter bit      DEBUG                                    = 1'b0,
 
     // Bus configuration
     parameter int CONFIG_BUS_WIDTH = 64,
@@ -115,7 +115,7 @@ module bnn_fcc_tb #(
     // DUT configuration (can be modified or extended for your own DUT)        
     localparam int NON_INPUT_LAYERS = USE_CUSTOM_TOPOLOGY ? CUSTOM_LAYERS - 1 : TRAINED_LAYERS - 1,
     parameter int PARALLEL_INPUTS = 8,
-    parameter int PARALLEL_NEURONS[NON_INPUT_LAYERS] = '{default: 8}
+    parameter int PARALLEL_NEURONS[NON_INPUT_LAYERS] = '{8, 8, 10}
 );
     import bnn_fcc_tb_pkg::*;
 
@@ -267,7 +267,7 @@ module bnn_fcc_tb #(
             $display("--- Loading Trained Model ---");
             path = $sformatf("%s/%s", BASE_DIR, MNIST_MODEL_DATA_PATH);
             model.load_from_file(path, ACTUAL_TOPOLOGY);
-            if (VERIFY_SV_MODEL_AGAINST_PYTHON) verify_model();
+            if (VERIFY_MODEL) verify_model();
             model.encode_configuration(config_bus_data_stream, config_bus_keep_stream);
             $display("--- Configuration created: %0d words (%0d-bit wide) ---", config_bus_data_stream.size(), CONFIG_BUS_WIDTH);
 
