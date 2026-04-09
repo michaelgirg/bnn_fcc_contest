@@ -25,71 +25,78 @@
 //   - done is a single cycle completion pulse only
 //   - Downstream argmax must use result_valid not done
 // =============================================================================
+`default_nettype none
+
 module bnn_core #(
-    parameter int INPUTS = 784,
+    parameter int INPUTS  = 784,
     parameter int HIDDEN1 = 256,
     parameter int HIDDEN2 = 256,
     parameter int OUTPUTS = 10,
-    parameter int PW = 8,
-    parameter int PN = 8,
-    // -------------------------------------------------------------------------
-    // Derived localparams — do not override
-    // -------------------------------------------------------------------------
+    parameter int PW      = 8,
+    parameter int PN      = 8,
+
     localparam int L1_COUNT_W = $clog2(INPUTS + 1),
     localparam int L2_COUNT_W = $clog2(HIDDEN1 + 1),
     localparam int L3_COUNT_W = $clog2(HIDDEN2 + 1),
-    localparam int THRESHOLD_W = L1_COUNT_W,
+
+    localparam int THRESHOLD_W =
+        (L1_COUNT_W > L2_COUNT_W) ?
+            ((L1_COUNT_W > L3_COUNT_W) ? L1_COUNT_W : L3_COUNT_W) :
+            ((L2_COUNT_W > L3_COUNT_W) ? L2_COUNT_W : L3_COUNT_W),
+
     localparam int POPCOUNT_OUT_W = OUTPUTS * L3_COUNT_W,
-    localparam int L1_ACT_W = HIDDEN1,
-    localparam int L2_ACT_W = HIDDEN2,
-    localparam int MAX_NEURONS = (HIDDEN1 > HIDDEN2) ? HIDDEN1 : HIDDEN2,
-    localparam int CFG_NEURON_W = $clog2(MAX_NEURONS),
-    localparam int MAX_BEATS_L1 = (INPUTS + PW - 1) / PW,
+    localparam int L1_ACT_W       = HIDDEN1,
+    localparam int L2_ACT_W       = HIDDEN2,
+
+    localparam int MAX_NEURONS =
+        (HIDDEN1 > HIDDEN2) ?
+            ((HIDDEN1 > OUTPUTS) ? HIDDEN1 : OUTPUTS) :
+            ((HIDDEN2 > OUTPUTS) ? HIDDEN2 : OUTPUTS),
+
+    localparam int CFG_NEURON_W = (MAX_NEURONS > 1) ? $clog2(MAX_NEURONS) : 1,
+
+    localparam int MAX_BEATS_L1 = (INPUTS  + PW - 1) / PW,
     localparam int MAX_BEATS_L2 = (HIDDEN1 + PW - 1) / PW,
     localparam int MAX_BEATS_L3 = (HIDDEN2 + PW - 1) / PW,
-    localparam int MAX_WEIGHT_BEATS  = (MAX_BEATS_L1 > MAX_BEATS_L2) ?
-                                       (MAX_BEATS_L1 > MAX_BEATS_L3 ? MAX_BEATS_L1 : MAX_BEATS_L3) :
-                                       (MAX_BEATS_L2 > MAX_BEATS_L3 ? MAX_BEATS_L2 : MAX_BEATS_L3),
-    localparam int CFG_WEIGHT_ADDR_W = $clog2(MAX_WEIGHT_BEATS),
-    // Per-layer cfg port widths — used for truncation at layer ports
-    localparam int L1_CFG_NEURON_W = (HIDDEN1 > 1) ? $clog2(HIDDEN1) : 1,
-    localparam int L2_CFG_NEURON_W = (HIDDEN2 > 1) ? $clog2(HIDDEN2) : 1,
-    localparam int L3_CFG_NEURON_W = (OUTPUTS > 1) ? $clog2(OUTPUTS) : 1,
+
+    localparam int MAX_WEIGHT_BEATS =
+        (MAX_BEATS_L1 > MAX_BEATS_L2) ?
+            ((MAX_BEATS_L1 > MAX_BEATS_L3) ? MAX_BEATS_L1 : MAX_BEATS_L3) :
+            ((MAX_BEATS_L2 > MAX_BEATS_L3) ? MAX_BEATS_L2 : MAX_BEATS_L3),
+
+    localparam int CFG_WEIGHT_ADDR_W = (MAX_WEIGHT_BEATS > 1) ? $clog2(MAX_WEIGHT_BEATS) : 1,
+
+    localparam int L1_CFG_NEURON_W      = (HIDDEN1 > 1) ? $clog2(HIDDEN1) : 1,
+    localparam int L2_CFG_NEURON_W      = (HIDDEN2 > 1) ? $clog2(HIDDEN2) : 1,
+    localparam int L3_CFG_NEURON_W      = (OUTPUTS > 1) ? $clog2(OUTPUTS) : 1,
+
     localparam int L1_CFG_WEIGHT_ADDR_W = (MAX_BEATS_L1 > 1) ? $clog2(MAX_BEATS_L1) : 1,
     localparam int L2_CFG_WEIGHT_ADDR_W = (MAX_BEATS_L2 > 1) ? $clog2(MAX_BEATS_L2) : 1,
     localparam int L3_CFG_WEIGHT_ADDR_W = (MAX_BEATS_L3 > 1) ? $clog2(MAX_BEATS_L3) : 1
 ) (
-    input  wire logic                         clk,
-    input  wire logic                         rst,
-    // -------------------------------------------------------------------------
-    // Inference interface
-    // -------------------------------------------------------------------------
-    input  wire logic                         start,
-    input  wire logic [           INPUTS-1:0] input_vector,
-    output logic                              done,
-    output logic                              busy,
-    output logic                              result_valid,
-    // -------------------------------------------------------------------------
-    // Result outputs
-    // -------------------------------------------------------------------------
-    output logic      [   POPCOUNT_OUT_W-1:0] popcounts_out,
-    output logic      [         L1_ACT_W-1:0] activations_l1,
-    output logic      [         L2_ACT_W-1:0] activations_l2,
-    // -------------------------------------------------------------------------
-    // Configuration interface
-    // -------------------------------------------------------------------------
-    input  wire logic                         cfg_write_en,
-    input  wire logic [                  1:0] cfg_layer_sel,
-    input  wire logic [     CFG_NEURON_W-1:0] cfg_neuron_idx,
-    input  wire logic [CFG_WEIGHT_ADDR_W-1:0] cfg_weight_addr,
-    input  wire logic [               PW-1:0] cfg_weight_data,
-    input  wire logic [      THRESHOLD_W-1:0] cfg_threshold_data,
-    input  wire logic                         cfg_threshold_write,
-    output logic                              cfg_ready
+    input  logic                         clk,
+    input  logic                         rst,
+
+    input  logic                         start,
+    input  logic [INPUTS-1:0]            input_vector,
+    output logic                         done,
+    output logic                         busy,
+    output logic                         result_valid,
+
+    output logic [POPCOUNT_OUT_W-1:0]    popcounts_out,
+    output logic [L1_ACT_W-1:0]          activations_l1,
+    output logic [L2_ACT_W-1:0]          activations_l2,
+
+    input  logic                         cfg_write_en,
+    input  logic [1:0]                   cfg_layer_sel,
+    input  logic [CFG_NEURON_W-1:0]      cfg_neuron_idx,
+    input  logic [CFG_WEIGHT_ADDR_W-1:0] cfg_weight_addr,
+    input  logic [PW-1:0]                cfg_weight_data,
+    input  logic [THRESHOLD_W-1:0]       cfg_threshold_data,
+    input  logic                         cfg_threshold_write,
+    output logic                         cfg_ready
 );
-    // =========================================================================
-    // FSM state encoding
-    // =========================================================================
+
     typedef enum logic [2:0] {
         IDLE,
         LOAD_L1,
@@ -101,36 +108,35 @@ module bnn_core #(
         DONE
     } state_t;
 
-    state_t                      state_r;
-    state_t                      state_prev_r;
-    logic                        done_r;
+    state_t state_r, state_prev_r;
 
-    // =========================================================================
-    // Inter-layer capture registers
-    // =========================================================================
-    logic   [      L1_ACT_W-1:0] l1_activations_r;
-    logic   [      L2_ACT_W-1:0] l2_activations_r;
-    logic   [POPCOUNT_OUT_W-1:0] l3_popcounts_r;
+    logic done_r;
 
-    // =========================================================================
-    // Layer control wires
-    // =========================================================================
+    logic [L1_ACT_W-1:0]       l1_activations_r;
+    logic [L2_ACT_W-1:0]       l2_activations_r;
+    logic [POPCOUNT_OUT_W-1:0] l3_popcounts_r;
+
     logic l1_load, l2_load, l3_load;
     logic l1_start_pulse, l2_start_pulse, l3_start_pulse;
     logic l1_done, l2_done, l3_done;
     logic l1_busy, l2_busy, l3_busy;
 
-    // =========================================================================
-    // Layer output port wires
-    // =========================================================================
-    logic [      L1_ACT_W-1:0] l1_activations_out;
-    logic [      L2_ACT_W-1:0] l2_activations_out;
+    logic [L1_ACT_W-1:0]       l1_activations_out;
+    logic [L2_ACT_W-1:0]       l2_activations_out;
     logic [POPCOUNT_OUT_W-1:0] l3_popcounts_out;
 
-    // =========================================================================
-    // Configuration routing
-    // =========================================================================
     logic l1_cfg_write_en, l2_cfg_write_en, l3_cfg_write_en;
+    logic l1_cfg_ready,    l2_cfg_ready,    l3_cfg_ready;
+    logic selected_cfg_ready;
+
+    always_comb begin
+        case (cfg_layer_sel)
+            2'd0:    selected_cfg_ready = l1_cfg_ready;
+            2'd1:    selected_cfg_ready = l2_cfg_ready;
+            2'd2:    selected_cfg_ready = l3_cfg_ready;
+            default: selected_cfg_ready = 1'b0;
+        endcase
+    end
 
     always_comb begin
         l1_cfg_write_en = cfg_write_en && cfg_ready && (cfg_layer_sel == 2'd0);
@@ -138,18 +144,12 @@ module bnn_core #(
         l3_cfg_write_en = cfg_write_en && cfg_ready && (cfg_layer_sel == 2'd2);
     end
 
-    // =========================================================================
-    // One-shot start pulse generation
-    // =========================================================================
     always_comb begin
         l1_start_pulse = (state_r == RUN_L1) && (state_prev_r != RUN_L1);
         l2_start_pulse = (state_r == RUN_L2) && (state_prev_r != RUN_L2);
         l3_start_pulse = (state_r == RUN_L3) && (state_prev_r != RUN_L3);
     end
 
-    // =========================================================================
-    // Control signal decode
-    // =========================================================================
     always_comb begin
         l1_load   = 1'b0;
         l2_load   = 1'b0;
@@ -160,7 +160,7 @@ module bnn_core #(
         case (state_r)
             IDLE: begin
                 busy      = 1'b0;
-                cfg_ready = 1'b1;
+                cfg_ready = selected_cfg_ready;
             end
             LOAD_L1: l1_load = 1'b1;
             LOAD_L2: l2_load = 1'b1;
@@ -169,9 +169,6 @@ module bnn_core #(
         endcase
     end
 
-    // =========================================================================
-    // Main FSM + capture registers
-    // =========================================================================
     always_ff @(posedge clk) begin
         if (rst) begin
             state_r          <= IDLE;
@@ -231,23 +228,16 @@ module bnn_core #(
         end
     end
 
-    // =========================================================================
-    // Output assignments
-    // =========================================================================
     assign done           = done_r;
     assign popcounts_out  = l3_popcounts_r;
     assign activations_l1 = l1_activations_r;
     assign activations_l2 = l2_activations_r;
 
-    // =========================================================================
-    // Layer instantiation
-    // =========================================================================
-
     bnn_layer #(
-        .INPUTS      (INPUTS),
-        .NEURONS     (HIDDEN1),
-        .PW          (PW),
-        .PN          (PN),
+        .INPUTS(INPUTS),
+        .NEURONS(HIDDEN1),
+        .PW(PW),
+        .PN(PN),
         .OUTPUT_LAYER(0)
     ) u_layer1 (
         .clk                (clk),
@@ -266,14 +256,14 @@ module bnn_core #(
         .cfg_weight_data    (cfg_weight_data),
         .cfg_threshold_data (cfg_threshold_data[L1_COUNT_W-1:0]),
         .cfg_threshold_write(cfg_threshold_write),
-        .cfg_ready          ()
+        .cfg_ready          (l1_cfg_ready)
     );
 
     bnn_layer #(
-        .INPUTS      (HIDDEN1),
-        .NEURONS     (HIDDEN2),
-        .PW          (PW),
-        .PN          (PN),
+        .INPUTS(HIDDEN1),
+        .NEURONS(HIDDEN2),
+        .PW(PW),
+        .PN(PN),
         .OUTPUT_LAYER(0)
     ) u_layer2 (
         .clk                (clk),
@@ -292,14 +282,14 @@ module bnn_core #(
         .cfg_weight_data    (cfg_weight_data),
         .cfg_threshold_data (cfg_threshold_data[L2_COUNT_W-1:0]),
         .cfg_threshold_write(cfg_threshold_write),
-        .cfg_ready          ()
+        .cfg_ready          (l2_cfg_ready)
     );
 
     bnn_layer #(
-        .INPUTS      (HIDDEN2),
-        .NEURONS     (OUTPUTS),
-        .PW          (PW),
-        .PN          (PN),
+        .INPUTS(HIDDEN2),
+        .NEURONS(OUTPUTS),
+        .PW(PW),
+        .PN(PN),
         .OUTPUT_LAYER(1)
     ) u_layer3 (
         .clk                (clk),
@@ -318,7 +308,7 @@ module bnn_core #(
         .cfg_weight_data    (cfg_weight_data),
         .cfg_threshold_data (cfg_threshold_data[L3_COUNT_W-1:0]),
         .cfg_threshold_write(cfg_threshold_write),
-        .cfg_ready          ()
+        .cfg_ready          (l3_cfg_ready)
     );
 
     // =========================================================================
