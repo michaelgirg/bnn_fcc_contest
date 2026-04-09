@@ -42,23 +42,23 @@ module config_manager_multi #(
             ((L0_COUNT_WIDTH > L2_COUNT_WIDTH) ? L0_COUNT_WIDTH : L2_COUNT_WIDTH) :
             ((L1_COUNT_WIDTH > L2_COUNT_WIDTH) ? L1_COUNT_WIDTH : L2_COUNT_WIDTH)
 ) (
-    input  logic                         clk,
-    input  logic                         rst,
+    input  wire logic                          clk,
+    input  wire logic                          rst,
 
-    input  logic                         cfg_valid,
-    output logic                         cfg_ready,
-    input  logic [CONFIG_BUS_WIDTH-1:0]  cfg_data,
-    input  logic [CONFIG_BUS_WIDTH/8-1:0] cfg_keep,
-    input  logic                         cfg_last,
+    input  wire logic                          cfg_valid,
+    output      logic                          cfg_ready,
+    input  wire logic [CONFIG_BUS_WIDTH-1:0]   cfg_data,
+    input  wire logic [CONFIG_BUS_WIDTH/8-1:0] cfg_keep,
+    input  wire logic                          cfg_last,
 
-    output logic                         out_cfg_write_en,
-    output logic [1:0]                   out_cfg_layer_sel,
-    output logic [CFG_NEURON_W-1:0]      out_cfg_neuron_idx,
-    output logic [CFG_WEIGHT_ADDR_W-1:0] out_cfg_weight_addr,
-    output logic [PW-1:0]                out_cfg_weight_data,
-    output logic [THRESHOLD_W-1:0]       out_cfg_threshold_data,
-    output logic                         out_cfg_threshold_write,
-    input  logic                         out_cfg_ready
+    output      logic                          out_cfg_write_en,
+    output      logic [1:0]                    out_cfg_layer_sel,
+    output      logic [CFG_NEURON_W-1:0]       out_cfg_neuron_idx,
+    output      logic [CFG_WEIGHT_ADDR_W-1:0]  out_cfg_weight_addr,
+    output      logic [PW-1:0]                 out_cfg_weight_data,
+    output      logic [THRESHOLD_W-1:0]        out_cfg_threshold_data,
+    output      logic                          out_cfg_threshold_write,
+    input  wire logic                          out_cfg_ready
 );
 
     typedef enum logic [2:0] {
