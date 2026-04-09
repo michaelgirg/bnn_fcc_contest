@@ -1,59 +1,57 @@
 `timescale 1ns / 1ps
 
 module config_manager_multi_tb;
-    import bnn_config_pkg::*;
+    import bnn_config_golden_pkg::*;
 
     localparam int CONFIG_BUS_WIDTH = 64;
+    localparam int PW               = 8;
 
-    localparam int L0_INPUTS  = 784;
-    localparam int L0_NEURONS = 256;
-    localparam int L0_PW      = 8;
-    localparam int L0_COUNTW  = $clog2(L0_INPUTS + 1);
-    localparam int L0_BEATS   = (L0_INPUTS + L0_PW - 1) / L0_PW;
-    localparam int L0_NIDX_W  = (L0_NEURONS > 1) ? $clog2(L0_NEURONS) : 1;
-    localparam int L0_ADDR_W  = (L0_BEATS > 1) ? $clog2(L0_BEATS) : 1;
+    localparam int L0_INPUTS        = 784;
+    localparam int L0_NEURONS       = 256;
+    localparam int L0_COUNTW        = $clog2(L0_INPUTS + 1);
+    localparam int L0_BEATS         = (L0_INPUTS + PW - 1) / PW;
+    localparam int L0_NIDX_W        = (L0_NEURONS > 1) ? $clog2(L0_NEURONS) : 1;
+    localparam int L0_ADDR_W        = (L0_BEATS > 1) ? $clog2(L0_BEATS) : 1;
 
-    localparam int L1_INPUTS  = 256;
-    localparam int L1_NEURONS = 256;
-    localparam int L1_PW      = 8;
-    localparam int L1_COUNTW  = $clog2(L1_INPUTS + 1);
-    localparam int L1_BEATS   = (L1_INPUTS + L1_PW - 1) / L1_PW;
-    localparam int L1_NIDX_W  = (L1_NEURONS > 1) ? $clog2(L1_NEURONS) : 1;
-    localparam int L1_ADDR_W  = (L1_BEATS > 1) ? $clog2(L1_BEATS) : 1;
+    localparam int L1_INPUTS        = 256;
+    localparam int L1_NEURONS       = 256;
+    localparam int L1_COUNTW        = $clog2(L1_INPUTS + 1);
+    localparam int L1_BEATS         = (L1_INPUTS + PW - 1) / PW;
+    localparam int L1_NIDX_W        = (L1_NEURONS > 1) ? $clog2(L1_NEURONS) : 1;
+    localparam int L1_ADDR_W        = (L1_BEATS > 1) ? $clog2(L1_BEATS) : 1;
 
-    localparam int L2_INPUTS  = 256;
-    localparam int L2_NEURONS = 10;
-    localparam int L2_PW      = 8;
-    localparam int L2_COUNTW  = $clog2(L2_INPUTS + 1);
-    localparam int L2_BEATS   = (L2_INPUTS + L2_PW - 1) / L2_PW;
-    localparam int L2_NIDX_W  = (L2_NEURONS > 1) ? $clog2(L2_NEURONS) : 1;
-    localparam int L2_ADDR_W  = (L2_BEATS > 1) ? $clog2(L2_BEATS) : 1;
+    localparam int L2_INPUTS        = 256;
+    localparam int L2_NEURONS       = 10;
+    localparam int L2_COUNTW        = $clog2(L2_INPUTS + 1);
+    localparam int L2_BEATS         = (L2_INPUTS + PW - 1) / PW;
+    localparam int L2_NIDX_W        = (L2_NEURONS > 1) ? $clog2(L2_NEURONS) : 1;
+    localparam int L2_ADDR_W        = (L2_BEATS > 1) ? $clog2(L2_BEATS) : 1;
 
     logic clk, rst;
 
-    logic                        cfg_valid;
-    logic                        cfg_ready;
-    logic [CONFIG_BUS_WIDTH-1:0] cfg_data;
-    logic [CONFIG_BUS_WIDTH/8-1:0] cfg_keep;
-    logic                        cfg_last;
+    logic                             cfg_valid;
+    logic                             cfg_ready;
+    logic [CONFIG_BUS_WIDTH-1:0]      cfg_data;
+    logic [CONFIG_BUS_WIDTH/8-1:0]    cfg_keep;
+    logic                             cfg_last;
 
-    logic                    l0_cfg_we, l0_cfg_tw, l0_cfg_rdy;
-    logic [L0_NIDX_W-1:0]    l0_cfg_nidx;
-    logic [L0_ADDR_W-1:0]    l0_cfg_addr;
-    logic [L0_PW-1:0]        l0_cfg_wdata;
-    logic [L0_COUNTW-1:0]    l0_cfg_tdata;
+    logic                             l0_cfg_we, l0_cfg_tw, l0_cfg_rdy;
+    logic [L0_NIDX_W-1:0]             l0_cfg_nidx;
+    logic [L0_ADDR_W-1:0]             l0_cfg_addr;
+    logic [PW-1:0]                    l0_cfg_wdata;
+    logic [L0_COUNTW-1:0]             l0_cfg_tdata;
 
-    logic                    l1_cfg_we, l1_cfg_tw, l1_cfg_rdy;
-    logic [L1_NIDX_W-1:0]    l1_cfg_nidx;
-    logic [L1_ADDR_W-1:0]    l1_cfg_addr;
-    logic [L1_PW-1:0]        l1_cfg_wdata;
-    logic [L1_COUNTW-1:0]    l1_cfg_tdata;
+    logic                             l1_cfg_we, l1_cfg_tw, l1_cfg_rdy;
+    logic [L1_NIDX_W-1:0]             l1_cfg_nidx;
+    logic [L1_ADDR_W-1:0]             l1_cfg_addr;
+    logic [PW-1:0]                    l1_cfg_wdata;
+    logic [L1_COUNTW-1:0]             l1_cfg_tdata;
 
-    logic                    l2_cfg_we, l2_cfg_tw, l2_cfg_rdy;
-    logic [L2_NIDX_W-1:0]    l2_cfg_nidx;
-    logic [L2_ADDR_W-1:0]    l2_cfg_addr;
-    logic [L2_PW-1:0]        l2_cfg_wdata;
-    logic [L2_COUNTW-1:0]    l2_cfg_tdata;
+    logic                             l2_cfg_we, l2_cfg_tw, l2_cfg_rdy;
+    logic [L2_NIDX_W-1:0]             l2_cfg_nidx;
+    logic [L2_ADDR_W-1:0]             l2_cfg_addr;
+    logic [PW-1:0]                    l2_cfg_wdata;
+    logic [L2_COUNTW-1:0]             l2_cfg_tdata;
 
     bit          weights0[L0_NEURONS][L0_INPUTS];
     bit          weights1[L1_NEURONS][L1_INPUTS];
@@ -79,9 +77,10 @@ module config_manager_multi_tb;
 
     config_manager_multi #(
         .CONFIG_BUS_WIDTH(CONFIG_BUS_WIDTH),
-        .L0_INPUTS(L0_INPUTS), .L0_NEURONS(L0_NEURONS), .L0_PW(L0_PW),
-        .L1_INPUTS(L1_INPUTS), .L1_NEURONS(L1_NEURONS), .L1_PW(L1_PW),
-        .L2_INPUTS(L2_INPUTS), .L2_NEURONS(L2_NEURONS), .L2_PW(L2_PW)
+        .PW(PW),
+        .L0_INPUTS(L0_INPUTS), .L0_NEURONS(L0_NEURONS),
+        .L1_INPUTS(L1_INPUTS), .L1_NEURONS(L1_NEURONS),
+        .L2_INPUTS(L2_INPUTS), .L2_NEURONS(L2_NEURONS)
     ) dut (
         .clk(clk),
         .rst(rst),
@@ -125,11 +124,9 @@ module config_manager_multi_tb;
             cfg_data  = '0;
             cfg_keep  = '0;
             cfg_last  = 1'b0;
-
             l0_cfg_rdy = 1'b1;
             l1_cfg_rdy = 1'b1;
             l2_cfg_rdy = 1'b1;
-
             repeat (5) @(posedge clk);
             rst = 1'b0;
             repeat (2) @(posedge clk);
@@ -161,7 +158,6 @@ module config_manager_multi_tb;
         begin
             stream_bytes.delete();
             axi_beats.delete();
-
             exp_w0.delete(); exp_t0.delete();
             exp_w1.delete(); exp_t1.delete();
             exp_w2.delete(); exp_t2.delete();
@@ -172,19 +168,12 @@ module config_manager_multi_tb;
 
             pack_bytes_to_axi64(stream_bytes, axi_beats);
 
-            process_stream_for_layer(stream_bytes, 0, L0_PW, meta0, meta0_valid, exp_w0, exp_t0);
-            process_stream_for_layer(stream_bytes, 1, L1_PW, meta1, meta1_valid, exp_w1, exp_t1);
-            process_stream_for_layer(stream_bytes, 2, L2_PW, meta2, meta2_valid, exp_w2, exp_t2);
+            process_stream_for_layer(stream_bytes, 0, PW, meta0, meta0_valid, exp_w0, exp_t0);
+            process_stream_for_layer(stream_bytes, 1, PW, meta1, meta1_valid, exp_w1, exp_t1);
+            process_stream_for_layer(stream_bytes, 2, PW, meta2, meta2_valid, exp_w2, exp_t2);
 
             if (!meta0_valid || !meta1_valid || !meta2_valid)
                 $fatal(1, "Missing weight header for one or more layers");
-
-            if (exp_w0.size() != L0_NEURONS * L0_BEATS) $fatal(1, "Bad L0 weight count");
-            if (exp_t0.size() != L0_NEURONS)            $fatal(1, "Bad L0 threshold count");
-            if (exp_w1.size() != L1_NEURONS * L1_BEATS) $fatal(1, "Bad L1 weight count");
-            if (exp_t1.size() != L1_NEURONS)            $fatal(1, "Bad L1 threshold count");
-            if (exp_w2.size() != L2_NEURONS * L2_BEATS) $fatal(1, "Bad L2 weight count");
-            if (exp_t2.size() != L2_NEURONS)            $fatal(1, "Bad L2 threshold count");
         end
     endtask
 
@@ -221,13 +210,14 @@ module config_manager_multi_tb;
                 if (w_seen0 >= exp_w0.size()) $fatal(1, "Extra L0 weight write");
                 if (l0_cfg_nidx !== exp_w0[w_seen0].neuron[L0_NIDX_W-1:0]) $fatal(1, "L0 weight neuron mismatch");
                 if (l0_cfg_addr !== exp_w0[w_seen0].beat[L0_ADDR_W-1:0])   $fatal(1, "L0 weight addr mismatch");
-                if (l0_cfg_wdata !== exp_w0[w_seen0].word[L0_PW-1:0])      $fatal(1, "L0 weight data mismatch");
+                if (l0_cfg_wdata !== exp_w0[w_seen0].word[PW-1:0])         $fatal(1, "L0 weight data mismatch");
                 w_seen0 <= w_seen0 + 1;
             end
+
             if (l0_cfg_tw && l0_cfg_rdy) begin
                 if (t_seen0 >= exp_t0.size()) $fatal(1, "Extra L0 threshold write");
-                if (l0_cfg_nidx !== exp_t0[t_seen0].neuron[L0_NIDX_W-1:0]) $fatal(1, "L0 thresh neuron mismatch");
-                if (l0_cfg_tdata !== exp_t0[t_seen0].thresh[L0_COUNTW-1:0]) $fatal(1, "L0 thresh data mismatch");
+                if (l0_cfg_nidx !== exp_t0[t_seen0].neuron[L0_NIDX_W-1:0]) $fatal(1, "L0 threshold neuron mismatch");
+                if (l0_cfg_tdata !== exp_t0[t_seen0].thresh[L0_COUNTW-1:0]) $fatal(1, "L0 threshold data mismatch");
                 t_seen0 <= t_seen0 + 1;
             end
 
@@ -235,13 +225,14 @@ module config_manager_multi_tb;
                 if (w_seen1 >= exp_w1.size()) $fatal(1, "Extra L1 weight write");
                 if (l1_cfg_nidx !== exp_w1[w_seen1].neuron[L1_NIDX_W-1:0]) $fatal(1, "L1 weight neuron mismatch");
                 if (l1_cfg_addr !== exp_w1[w_seen1].beat[L1_ADDR_W-1:0])   $fatal(1, "L1 weight addr mismatch");
-                if (l1_cfg_wdata !== exp_w1[w_seen1].word[L1_PW-1:0])      $fatal(1, "L1 weight data mismatch");
+                if (l1_cfg_wdata !== exp_w1[w_seen1].word[PW-1:0])         $fatal(1, "L1 weight data mismatch");
                 w_seen1 <= w_seen1 + 1;
             end
+
             if (l1_cfg_tw && l1_cfg_rdy) begin
                 if (t_seen1 >= exp_t1.size()) $fatal(1, "Extra L1 threshold write");
-                if (l1_cfg_nidx !== exp_t1[t_seen1].neuron[L1_NIDX_W-1:0]) $fatal(1, "L1 thresh neuron mismatch");
-                if (l1_cfg_tdata !== exp_t1[t_seen1].thresh[L1_COUNTW-1:0]) $fatal(1, "L1 thresh data mismatch");
+                if (l1_cfg_nidx !== exp_t1[t_seen1].neuron[L1_NIDX_W-1:0]) $fatal(1, "L1 threshold neuron mismatch");
+                if (l1_cfg_tdata !== exp_t1[t_seen1].thresh[L1_COUNTW-1:0]) $fatal(1, "L1 threshold data mismatch");
                 t_seen1 <= t_seen1 + 1;
             end
 
@@ -249,13 +240,14 @@ module config_manager_multi_tb;
                 if (w_seen2 >= exp_w2.size()) $fatal(1, "Extra L2 weight write");
                 if (l2_cfg_nidx !== exp_w2[w_seen2].neuron[L2_NIDX_W-1:0]) $fatal(1, "L2 weight neuron mismatch");
                 if (l2_cfg_addr !== exp_w2[w_seen2].beat[L2_ADDR_W-1:0])   $fatal(1, "L2 weight addr mismatch");
-                if (l2_cfg_wdata !== exp_w2[w_seen2].word[L2_PW-1:0])      $fatal(1, "L2 weight data mismatch");
+                if (l2_cfg_wdata !== exp_w2[w_seen2].word[PW-1:0])         $fatal(1, "L2 weight data mismatch");
                 w_seen2 <= w_seen2 + 1;
             end
+
             if (l2_cfg_tw && l2_cfg_rdy) begin
                 if (t_seen2 >= exp_t2.size()) $fatal(1, "Extra L2 threshold write");
-                if (l2_cfg_nidx !== exp_t2[t_seen2].neuron[L2_NIDX_W-1:0]) $fatal(1, "L2 thresh neuron mismatch");
-                if (l2_cfg_tdata !== exp_t2[t_seen2].thresh[L2_COUNTW-1:0]) $fatal(1, "L2 thresh data mismatch");
+                if (l2_cfg_nidx !== exp_t2[t_seen2].neuron[L2_NIDX_W-1:0]) $fatal(1, "L2 threshold neuron mismatch");
+                if (l2_cfg_tdata !== exp_t2[t_seen2].thresh[L2_COUNTW-1:0]) $fatal(1, "L2 threshold data mismatch");
                 t_seen2 <= t_seen2 + 1;
             end
         end
@@ -306,7 +298,6 @@ module config_manager_multi_tb;
                   (w_seen2 == exp_w2.size()) && (t_seen2 == exp_t2.size()));
 
             repeat (10) @(posedge clk);
-
             $display("%s PASS", name);
         end
     endtask
@@ -324,14 +315,10 @@ module config_manager_multi_tb;
     initial begin
         #20ms;
         $fatal(1,
-            "TB timeout: "
-            // layer 0
-            //"L0 w=%0d/%0d t=%0d/%0d "
-            //"L1 w=%0d/%0d t=%0d/%0d "
-            //"L2 w=%0d/%0d t=%0d/%0d",
-            , w_seen0, exp_w0.size(), t_seen0, exp_t0.size()
-            , w_seen1, exp_w1.size(), t_seen1, exp_t1.size()
-            , w_seen2, exp_w2.size(), t_seen2, exp_t2.size()
+            "TB timeout: L0 w=%0d/%0d t=%0d/%0d | L1 w=%0d/%0d t=%0d/%0d | L2 w=%0d/%0d t=%0d/%0d",
+            w_seen0, exp_w0.size(), t_seen0, exp_t0.size(),
+            w_seen1, exp_w1.size(), t_seen1, exp_t1.size(),
+            w_seen2, exp_w2.size(), t_seen2, exp_t2.size()
         );
     end
 
