@@ -1,3 +1,4 @@
 work/
 transcript
 *.mpf
+__pycache__
