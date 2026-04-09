@@ -30,7 +30,7 @@ module config_parser_tb;
     // ---------------------------------------------------------
     // DUT & Golden Model
     // ---------------------------------------------------------
-    bnn_config_manager #(PW, MAX_NEURONS, MAX_BEATS) dut (.*);
+    config_parser #(PW, MAX_NEURONS, MAX_BEATS) dut (.*);
     
     // Split declaration and instantiation to make Modelsim happy
     ConfigParser gold;
