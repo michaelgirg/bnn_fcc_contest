@@ -1,158 +1,213 @@
-// rtl/config_parser.sv
-//
-// Phase 1: Decodes the 128-bit config message header arriving on
-// a CONFIG_BUS_WIDTH AXI4-Stream bus. The header spans two beats
-// on the default 64-bit bus:
-//
-//   Beat 0 (Word 0):
-//     [7:0]   msg_type         (0=weights, 1=thresholds)
-//     [15:8]  layer_id
-//     [31:16] layer_inputs     (fan-in of this layer)
-//     [47:32] num_neurons
-//     [63:48] bytes_per_neuron
-//
-//   Beat 1 (Word 1):
-//     [31:0]  total_bytes      (payload size in bytes)
-//     [63:32] reserved
-//
-// After Word 1 is captured, header_valid pulses for one cycle and
-// the FSM moves to S_PAYLOAD, counting bytes until config_last.
-//
-// Phase 2 will add: asymmetric FIFO + per-byte payload output.
-// Phase 3 will add: RAM write logic for weights and thresholds.
+`timescale 1ns / 1ps
 
 module config_parser #(
-    parameter int CONFIG_BUS_WIDTH = 64
+    parameter int PW          = 8,
+    parameter int MAX_NEURONS = 256,
+    parameter int MAX_BEATS   = 98   // ceil(784/PW)
 )(
-    input  logic clk,
-    input  logic rst,  // synchronous, active-high
+    input  logic        clk,
+    input  logic        rst,
 
-    // AXI4-Stream config input
-    input  logic                            config_valid,
-    output logic                            config_ready,
-    input  logic [CONFIG_BUS_WIDTH-1:0]     config_data,
-    input  logic [CONFIG_BUS_WIDTH/8-1:0]   config_keep,
-    input  logic                            config_last,
+    // AXI4-Stream config input (64-bit bus)
+    input  logic        cfg_valid,
+    output logic        cfg_ready,
+    input  logic [63:0] cfg_data,
+    input  logic [7:0]  cfg_keep,
+    input  logic        cfg_last,
 
-    // Decoded header (held stable; header_valid pulses for 1 cycle when new)
-    output logic        header_valid,
-    output logic [7:0]  o_msg_type,
-    output logic [7:0]  o_layer_id,
-    output logic [15:0] o_layer_inputs,
-    output logic [15:0] o_num_neurons,
-    output logic [15:0] o_bytes_per_neuron,
-    output logic [31:0] o_total_bytes,
-
-    // Payload status (Phase 2 will replace these with a real byte stream)
-    output logic [31:0] payload_byte_count, // bytes consumed in current message
-    output logic        config_done         // held high after all messages received
-                                            // (Phase 3 will drive this properly)
+    // bnn_layer config port
+    output logic        cfg_we,
+    output logic        cfg_tw,
+    output logic [7:0]  cfg_nidx,
+    output logic [$clog2(MAX_BEATS)-1:0] cfg_addr,
+    output logic [PW-1:0]                cfg_wdata,
+    output logic [9:0]                   cfg_tdata, 
+    input  logic                         cfg_rdy
 );
 
-    // -----------------------------------------------------------------------
-    // FSM state encoding
-    // -----------------------------------------------------------------------
-    typedef enum logic [1:0] {
-        S_HDR_W0  = 2'b00,  // waiting for header beat 0
-        S_HDR_W1  = 2'b01,  // waiting for header beat 1
-        S_PAYLOAD = 2'b10   // consuming payload beats
-    } state_t;
+    // ---------------------------------------------------------
+    // 1. Asymmetric FIFO (64-bit -> 8-bit)
+    // ---------------------------------------------------------
+    // Logic to serialize the 64-bit AXI word into bytes
+    logic [63:0] fifo_data_q;
+    logic [2:0]  fifo_ptr_q;
+    logic        fifo_empty;
+    logic [7:0]  byte_out;
+    logic        byte_valid;
+    logic        byte_rd_en;
 
-    state_t state;
+    assign byte_out   = fifo_data_q[(fifo_ptr_q * 8) +: 8];
+    assign byte_valid = !fifo_empty;
+    assign cfg_ready  = fifo_empty; // Only accept new 64-bit word when current is exhausted
 
-    // In Phase 1 we never apply backpressure. Phase 2 may deassert
-    // config_ready briefly while the FIFO is full.
-    assign config_ready = 1'b1;
-
-    logic handshake;
-    assign handshake = config_valid & config_ready;
-
-    // -----------------------------------------------------------------------
-    // Header registers
-    // -----------------------------------------------------------------------
-    logic [7:0]  r_msg_type;
-    logic [7:0]  r_layer_id;
-    logic [15:0] r_layer_inputs;
-    logic [15:0] r_num_neurons;
-    logic [15:0] r_bytes_per_neuron;
-    logic [31:0] r_total_bytes;
-
-    // -----------------------------------------------------------------------
-    // FSM + datapath — single always_ff for clean synthesis
-    // -----------------------------------------------------------------------
     always_ff @(posedge clk) begin
         if (rst) begin
-            state              <= S_HDR_W0;
-            header_valid       <= 1'b0;
-            payload_byte_count <= '0;
-            r_msg_type         <= '0;
-            r_layer_id         <= '0;
-            r_layer_inputs     <= '0;
-            r_num_neurons      <= '0;
-            r_bytes_per_neuron <= '0;
-            r_total_bytes      <= '0;
+            fifo_ptr_q <= 0;
+            fifo_empty <= 1'b1;
+        end else if (cfg_valid && cfg_ready) begin
+            fifo_data_q <= cfg_data;
+            fifo_ptr_q  <= 0;
+            fifo_empty  <= 1'b0;
+        end else if (byte_rd_en && byte_valid) begin
+            if (fifo_ptr_q == 3'd7) fifo_empty <= 1'b1;
+            else                    fifo_ptr_q <= fifo_ptr_q + 1;
+        end
+    end
+
+    // ---------------------------------------------------------
+    // 2. FSM States
+    // ---------------------------------------------------------
+    typedef enum logic [2:0] {
+        IDLE          = 3'd0,
+        RECV_HEADER   = 3'd1,
+        DECODE        = 3'd2,
+        RECV_W_BYTES  = 3'd3,
+        WRITE_W_RAM   = 3'd4,
+        RECV_T_BYTES  = 3'd5,
+        WRITE_T_RAM   = 3'd6
+    } state_t;
+
+    state_t state, next;
+
+    // Header & Internal Registers
+    logic [7:0]  hdr_msgtype;
+    logic [15:0] hdr_layerinputs, hdr_numneurons, hdr_bytesperneu;
+    logic [31:0] hdr_totalbytes;
+    logic [31:0] thresh_reg;
+    
+    logic [3:0]  hdr_byte_cnt;
+    logic [7:0]  cur_neuron;
+    logic [$clog2(MAX_BEATS)-1:0] cur_beat;
+    logic [1:0]  thresh_byte_cnt;
+    logic [15:0] beats_per_neu;
+
+    // ---------------------------------------------------------
+    // 3. FSM Logic
+    // ---------------------------------------------------------
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            state <= IDLE;
+            hdr_byte_cnt <= 0;
+            cur_neuron <= 0;
+            cur_beat <= 0;
+            thresh_byte_cnt <= 0;
         end else begin
-
-            header_valid <= 1'b0; // default: not pulsing this cycle
-
+            state <= next;
+            
             case (state)
+                IDLE: begin
+                    hdr_byte_cnt <= 0;
+                    cur_neuron <= 0;
+                    cur_beat <= 0;
+                end
 
-                // --------------------------------------------------------
-                // S_HDR_W0: latch lower 64 bits of header
-                // --------------------------------------------------------
-                S_HDR_W0: begin
-                    if (handshake) begin
-                        r_msg_type         <= config_data[7:0];
-                        r_layer_id         <= config_data[15:8];
-                        r_layer_inputs     <= config_data[31:16];
-                        r_num_neurons      <= config_data[47:32];
-                        r_bytes_per_neuron <= config_data[63:48];
-                        state              <= S_HDR_W1;
+                RECV_HEADER: begin
+                    if (byte_valid) begin
+                        // Little-Endian Header Unpack (16 Bytes)
+                        case (hdr_byte_cnt)
+                            0: hdr_msgtype     <= byte_out;
+                            1: hdr_layerid     <= byte_out;
+                            2: hdr_layerinputs[7:0]  <= byte_out;
+                            3: hdr_layerinputs[15:8] <= byte_out;
+                            4: hdr_numneurons[7:0]   <= byte_out;
+                            5: hdr_numneurons[15:8]  <= byte_out;
+                            6: hdr_bytesperneu[7:0]  <= byte_out;
+                            7: hdr_bytesperneu[15:8] <= byte_out;
+                            8: hdr_totalbytes[7:0]   <= byte_out;
+                            9: hdr_totalbytes[15:8]  <= byte_out;
+                            10:hdr_totalbytes[23:16] <= byte_out;
+                            11:hdr_totalbytes[31:24] <= byte_out;
+                        endcase
+                        hdr_byte_cnt <= hdr_byte_cnt + 1;
                     end
                 end
 
-                // --------------------------------------------------------
-                // S_HDR_W1: latch upper 64 bits of header
-                //   config_data[31:0]  = total_bytes
-                //   config_data[63:32] = reserved (ignored)
-                // --------------------------------------------------------
-                S_HDR_W1: begin
-                    if (handshake) begin
-                        r_total_bytes      <= config_data[31:0];
-                        header_valid       <= 1'b1;
-                        payload_byte_count <= '0;
-                        state              <= S_PAYLOAD;
+                DECODE: begin
+                    // Pre-compute hardware-friendly limits
+                    beats_per_neu <= (hdr_layerinputs + PW - 1) / PW;
+                end
+
+                RECV_W_BYTES: begin
+                    if (byte_valid) cfg_wdata <= byte_out;
+                end
+
+                WRITE_W_RAM: begin
+                    if (cfg_rdy) begin
+                        if (cur_beat == beats_per_neu - 1) begin
+                            cur_beat <= 0;
+                            cur_neuron <= cur_neuron + 1;
+                        end else begin
+                            cur_beat <= cur_beat + 1;
+                        end
                     end
                 end
 
-                // --------------------------------------------------------
-                // S_PAYLOAD: count valid bytes via TKEEP until config_last
-                // --------------------------------------------------------
-                S_PAYLOAD: begin
-                    if (handshake) begin
-                        payload_byte_count <= payload_byte_count
-                                             + $countones(config_keep);
-                        if (config_last)
-                            state <= S_HDR_W0;
+                RECV_T_BYTES: begin
+                    if (byte_valid) begin
+                        thresh_reg <= {byte_out, thresh_reg[31:8]}; // Shift in LE
+                        thresh_byte_cnt <= thresh_byte_cnt + 1;
                     end
                 end
 
-                default: state <= S_HDR_W0;
+                WRITE_T_RAM: begin
+                    if (cfg_rdy) begin
+                        cur_neuron <= cur_neuron + 1;
+                        thresh_byte_cnt <= 0;
+                    end
+                end
             endcase
         end
     end
 
-    // -----------------------------------------------------------------------
-    // Output assignments
-    // -----------------------------------------------------------------------
-    assign o_msg_type         = r_msg_type;
-    assign o_layer_id         = r_layer_id;
-    assign o_layer_inputs     = r_layer_inputs;
-    assign o_num_neurons      = r_num_neurons;
-    assign o_bytes_per_neuron = r_bytes_per_neuron;
-    assign o_total_bytes      = r_total_bytes;
+    // Next State Logic
+    always_comb begin
+        next = state;
+        byte_rd_en = 1'b0;
+        cfg_we = 1'b0;
+        cfg_tw = 1'b0;
+        cfg_nidx = cur_neuron;
+        cfg_addr = cur_beat;
+        cfg_tdata = thresh_reg[9:0]; // Truncated to COUNT_W=10
 
-    // Phase 3 will properly track when all layers are loaded
-    assign config_done = 1'b0;
+        case (state)
+            IDLE:        if (byte_valid) next = RECV_HEADER;
+            RECV_HEADER: begin
+                if (byte_valid) begin
+                    byte_rd_en = 1'b1;
+                    if (hdr_byte_cnt == 15) next = DECODE;
+                end
+            end
+            DECODE:      next = (hdr_msgtype == 0) ? RECV_W_BYTES : RECV_T_BYTES;
+            
+            RECV_W_BYTES: begin
+                if (byte_valid) next = WRITE_W_RAM;
+            end
+            
+            WRITE_W_RAM: begin
+                cfg_we = 1'b1;
+                if (cfg_rdy) begin
+                    byte_rd_en = 1'b1;
+                    if (cur_neuron == hdr_numneurons[7:0] - 1 && cur_beat == beats_per_neu - 1) 
+                        next = IDLE;
+                    else 
+                        next = RECV_W_BYTES;
+                end
+            end
 
+            RECV_T_BYTES: begin
+                if (byte_valid) begin
+                    byte_rd_en = 1'b1;
+                    if (thresh_byte_cnt == 3) next = WRITE_T_RAM;
+                end
+            end
+
+            WRITE_T_RAM: begin
+                cfg_tw = 1'b1;
+                if (cfg_rdy) begin
+                    if (cur_neuron == hdr_numneurons[7:0] - 1) next = IDLE;
+                    else next = RECV_T_BYTES;
+                end
+            end
+        endcase
+    end
 endmodule
