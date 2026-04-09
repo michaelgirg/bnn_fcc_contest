@@ -160,14 +160,18 @@ module config_manager_multi_tb;
         input logic [1:0]  lid
     );
         logic [31:0] mask32;
+        logic [31:0] tmp32;
         logic [5:0]  cw;
         begin
             cw = layer_countw(lid);
+
             if (cw >= 32)
                 mask32 = 32'hFFFF_FFFF;
             else
                 mask32 = (32'h0000_0001 << cw) - 1;
-            trunc_threshold = (raw & mask32)[THRESHOLD_W-1:0];
+
+            tmp32 = raw & mask32;
+            trunc_threshold = tmp32[THRESHOLD_W-1:0];
         end
     endfunction
 
