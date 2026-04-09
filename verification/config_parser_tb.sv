@@ -1,176 +1,229 @@
 `timescale 1ns / 1ps
 
-import bnn_config_pkg::*; 
-
 module config_parser_tb;
 
-    // ---------------------------------------------------------
-    // Parameters & Signals
-    // ---------------------------------------------------------
-    parameter int PW = 8;
-    parameter int MAX_NEURONS = 256;
-    parameter int MAX_BEATS = 98;
+    import bnn_config_golden_pkg::*;
 
-    logic clk, rst;
-    
-    // AXI-Stream Signals
-    logic [63:0] cfg_data;
-    logic        cfg_valid;
-    logic        cfg_ready;
-    logic [7:0]  cfg_keep;
-    logic        cfg_last;
+    localparam int TARGET_LAYER_ID       = 0;
+    localparam int INPUTS                = 784;
+    localparam int NEURONS               = 256;
+    localparam int PW                    = 8;
+    localparam int COUNT_WIDTH           = $clog2(INPUTS + 1);
+    localparam int INPUT_BEATS           = (INPUTS + PW - 1) / PW;
+    localparam int CFG_NEURON_WIDTH      = (NEURONS > 1) ? $clog2(NEURONS) : 1;
+    localparam int CFG_WEIGHT_ADDR_WIDTH = (INPUT_BEATS > 1) ? $clog2(INPUT_BEATS) : 1;
 
-    // Layer Interface Signals
-    logic        cfg_we, cfg_tw, cfg_rdy;
-    logic [7:0]  cfg_nidx;
-    logic [$clog2(MAX_BEATS)-1:0] cfg_addr;
-    logic [PW-1:0]                cfg_wdata;
-    logic [9:0]                   cfg_tdata;
+    logic                             clk, rst;
+    logic                             cfg_valid, cfg_ready, cfg_last;
+    logic [63:0]                      cfg_data;
+    logic [7:0]                       cfg_keep;
 
-    // ---------------------------------------------------------
-    // DUT & Golden Model
-    // ---------------------------------------------------------
-    config_parser #(PW, MAX_NEURONS, MAX_BEATS) dut (.*);
-    
-    // Split declaration and instantiation to make Modelsim happy
-    ConfigParser gold;
+    logic                             layer_cfg_we, layer_cfg_tw, layer_cfg_rdy;
+    logic [CFG_NEURON_WIDTH-1:0]      layer_cfg_nidx;
+    logic [CFG_WEIGHT_ADDR_WIDTH-1:0] layer_cfg_addr;
+    logic [PW-1:0]                    layer_cfg_wdata;
+    logic [COUNT_WIDTH-1:0]           layer_cfg_tdata;
 
-    // ---------------------------------------------------------
-    // Testbench Variables & Scoreboard
-    // ---------------------------------------------------------
-    byte stream_q[$];
-    int errors = 0;
-    int tests_passed = 0;
+    bit weights[NEURONS][INPUTS];
+    int unsigned thresholds[NEURONS];
 
-    // Clock Generation
-    initial begin clk = 0; forever #5 clk = ~clk; end
+    byte_q_t       stream_bytes;
+    axi64_beat_t   axi_beats[$];
+    cfg_header_t   meta;
+    bit            meta_valid;
+    weight_write_t exp_w[$];
+    thresh_write_t exp_t[$];
 
-    // ---------------------------------------------------------
-    // Task: Drive AXI Stream (Made 'automatic')
-    // ---------------------------------------------------------
-    task automatic drive_stream(ref byte data[$]);
-        int i = 0; // Now legal because the task is automatic
-        while (i < data.size()) begin
-            @(posedge clk);
-            if (cfg_ready) begin
-                cfg_valid = 1'b1;
-                cfg_data  = 0;
-                // Pack 8 bytes into the 64-bit AXI word (Little Endian)
-                for (int b = 0; b < 8; b++) begin
-                    if (i < data.size()) begin
-                        cfg_data |= (64'(data[i]) << (b * 8));
-                        i++;
-                    end
-                end
-                cfg_last = (i >= data.size());
-            end else begin
-                @(posedge clk); // Wait for ready
-            end
-        end
-        @(posedge clk);
-        cfg_valid = 1'b0;
-    endtask
+    int unsigned w_seen, t_seen;
+    bit gaps_enable;
+    bit stalls_enable;
 
-    // ---------------------------------------------------------
-    // Task: Scoreboard Checker (Made 'automatic')
-    // ---------------------------------------------------------
-    task automatic check_results(int layer_id);
-        weight_write_t exp_w;
-        threshold_write_t exp_t;
-        
-        // Check Weights
-        while (gold.weight_writes[layer_id].size() > 0) begin
-            @(posedge clk);
-            if (cfg_we && cfg_rdy) begin
-                exp_w = gold.weight_writes[layer_id].pop_front();
-                if (cfg_nidx !== exp_w.neuron || cfg_addr !== exp_w.beat || cfg_wdata !== exp_w.word) begin
-                    $error("[FAIL] Weight Mismatch! Neu:%0d Beat:%0d Data:%h | Exp: Neu:%0d Beat:%0d Data:%h",
-                           cfg_nidx, cfg_addr, cfg_wdata, exp_w.neuron, exp_w.beat, exp_w.word);
-                    errors++;
-                end
-            end
-        end
+    config_parser #(
+        .TARGET_LAYER_ID(TARGET_LAYER_ID),
+        .INPUTS(INPUTS),
+        .NEURONS(NEURONS),
+        .PW(PW)
+    ) dut (
+        .clk(clk),
+        .rst(rst),
+        .cfg_valid(cfg_valid),
+        .cfg_ready(cfg_ready),
+        .cfg_data(cfg_data),
+        .cfg_keep(cfg_keep),
+        .cfg_last(cfg_last),
 
-        // Check Thresholds
-        while (gold.threshold_writes[layer_id].size() > 0) begin
-            @(posedge clk);
-            if (cfg_tw && cfg_rdy) begin
-                exp_t = gold.threshold_writes[layer_id].pop_front();
-                if (cfg_nidx !== exp_t.neuron || cfg_tdata !== exp_t.thresh) begin
-                    $error("[FAIL] Thresh Mismatch! Neu:%0d Data:%h | Exp: Neu:%0d Data:%h",
-                           cfg_nidx, cfg_tdata, exp_t.neuron, exp_t.thresh);
-                    errors++;
-                end
-            end
-        end
-        
-        if (errors == 0) begin
-            $display("[PASS] Layer %0d verification complete.", layer_id);
-            tests_passed++;
+        .cfg_we(layer_cfg_we),
+        .cfg_tw(layer_cfg_tw),
+        .cfg_nidx(layer_cfg_nidx),
+        .cfg_addr(layer_cfg_addr),
+        .cfg_wdata(layer_cfg_wdata),
+        .cfg_tdata(layer_cfg_tdata),
+        .cfg_rdy(layer_cfg_rdy)
+    );
+
+    always #5 clk = ~clk;
+
+    task automatic do_reset();
+        begin
+            rst       = 1'b1;
+            cfg_valid = 1'b0;
+            cfg_data  = '0;
+            cfg_keep  = '0;
+            cfg_last  = 1'b0;
+            layer_cfg_rdy = 1'b1;
+            repeat (5) @(posedge clk);
+            rst = 1'b0;
+            repeat (2) @(posedge clk);
         end
     endtask
 
-    // Helper to push 16-byte header into the stream queue (Made 'automatic')
-    task automatic push_header(byte mtype, byte id, shortint inputs, shortint neurons, shortint bpn, int total);
-        stream_q.push_back(mtype);
-        stream_q.push_back(id);
-        stream_q.push_back(inputs[7:0]);  stream_q.push_back(inputs[15:8]);
-        stream_q.push_back(neurons[7:0]); stream_q.push_back(neurons[15:8]);
-        stream_q.push_back(bpn[7:0]);     stream_q.push_back(bpn[15:8]);
-        stream_q.push_back(total[7:0]);   stream_q.push_back(total[15:8]);
-        stream_q.push_back(total[23:16]); stream_q.push_back(total[31:24]);
-        repeat(4) stream_q.push_back(8'h00); // Reserved
+    task automatic fill_random_model(input int unsigned seed);
+        void'($urandom(seed));
+        for (int n = 0; n < NEURONS; n++) begin
+            for (int i = 0; i < INPUTS; i++) begin
+                weights[n][i] = $urandom_range(0, 1);
+            end
+            thresholds[n] = $urandom_range(0, INPUTS);
+        end
     endtask
 
-    // ---------------------------------------------------------
-    // Test Suites
-    // ---------------------------------------------------------
+    task automatic build_case();
+        begin
+            stream_bytes.delete();
+            axi_beats.delete();
+            exp_w.delete();
+            exp_t.delete();
+
+            build_layer_stream(stream_bytes, TARGET_LAYER_ID, INPUTS, weights, thresholds);
+            pack_bytes_to_axi64(stream_bytes, axi_beats);
+            process_stream_for_layer(stream_bytes, TARGET_LAYER_ID, PW, meta, meta_valid, exp_w, exp_t);
+
+            if (!meta_valid) $fatal(1, "No weight header found for target layer");
+            if (exp_w.size() != (NEURONS * INPUT_BEATS))
+                $fatal(1, "Expected %0d weight writes, got %0d", NEURONS*INPUT_BEATS, exp_w.size());
+            if (exp_t.size() != NEURONS)
+                $fatal(1, "Expected %0d threshold writes, got %0d", NEURONS, exp_t.size());
+        end
+    endtask
+
+    task automatic drive_stream();
+        begin
+            for (int i = 0; i < axi_beats.size(); i++) begin
+                do begin
+                    @(posedge clk);
+                    cfg_valid <= 1'b1;
+                    cfg_data  <= axi_beats[i].data;
+                    cfg_keep  <= axi_beats[i].keep;
+                    cfg_last  <= axi_beats[i].last;
+                end while (!cfg_ready);
+
+                @(posedge clk);
+                cfg_valid <= 1'b0;
+                cfg_data  <= '0;
+                cfg_keep  <= '0;
+                cfg_last  <= 1'b0;
+
+                if (gaps_enable) begin
+                    repeat ($urandom_range(0, 3)) @(posedge clk);
+                end
+            end
+        end
+    endtask
+
+    always @(posedge clk) begin
+        if (rst) begin
+            w_seen <= 0;
+            t_seen <= 0;
+        end else begin
+            if (layer_cfg_we && layer_cfg_rdy) begin
+                if (w_seen >= exp_w.size())
+                    $fatal(1, "Extra weight write seen: n=%0d addr=%0d data=0x%0h",
+                           layer_cfg_nidx, layer_cfg_addr, layer_cfg_wdata);
+
+                if (layer_cfg_nidx !== exp_w[w_seen].neuron[CFG_NEURON_WIDTH-1:0])
+                    $fatal(1, "Weight write neuron mismatch exp=%0d got=%0d at idx=%0d",
+                           exp_w[w_seen].neuron, layer_cfg_nidx, w_seen);
+
+                if (layer_cfg_addr !== exp_w[w_seen].beat[CFG_WEIGHT_ADDR_WIDTH-1:0])
+                    $fatal(1, "Weight write addr mismatch exp=%0d got=%0d at idx=%0d",
+                           exp_w[w_seen].beat, layer_cfg_addr, w_seen);
+
+                if (layer_cfg_wdata !== exp_w[w_seen].word[PW-1:0])
+                    $fatal(1, "Weight write data mismatch exp=0x%0h got=0x%0h at idx=%0d",
+                           exp_w[w_seen].word[PW-1:0], layer_cfg_wdata, w_seen);
+
+                w_seen <= w_seen + 1;
+            end
+
+            if (layer_cfg_tw && layer_cfg_rdy) begin
+                if (t_seen >= exp_t.size())
+                    $fatal(1, "Extra threshold write seen: n=%0d t=0x%0h",
+                           layer_cfg_nidx, layer_cfg_tdata);
+
+                if (layer_cfg_nidx !== exp_t[t_seen].neuron[CFG_NEURON_WIDTH-1:0])
+                    $fatal(1, "Threshold neuron mismatch exp=%0d got=%0d at idx=%0d",
+                           exp_t[t_seen].neuron, layer_cfg_nidx, t_seen);
+
+                if (layer_cfg_tdata !== exp_t[t_seen].thresh[COUNT_WIDTH-1:0])
+                    $fatal(1, "Threshold data mismatch exp=0x%0h got=0x%0h at idx=%0d",
+                           exp_t[t_seen].thresh[COUNT_WIDTH-1:0], layer_cfg_tdata, t_seen);
+
+                t_seen <= t_seen + 1;
+            end
+        end
+    end
+
+    always @(posedge clk) begin
+        if (rst) begin
+            layer_cfg_rdy <= 1'b1;
+        end else if (stalls_enable) begin
+            layer_cfg_rdy <= ($urandom_range(0, 3) != 0); // 75% ready
+        end else begin
+            layer_cfg_rdy <= 1'b1;
+        end
+    end
+
+    task automatic run_test(
+        input string name,
+        input int unsigned seed,
+        input bit use_gaps,
+        input bit use_stalls
+    );
+        begin
+            $display("---- %s ----", name);
+            gaps_enable   = use_gaps;
+            stalls_enable = use_stalls;
+            w_seen        = 0;
+            t_seen        = 0;
+
+            do_reset();
+            fill_random_model(seed);
+            build_case();
+            fork
+                drive_stream();
+            join
+
+            wait (w_seen == exp_w.size() && t_seen == exp_t.size());
+            repeat (10) @(posedge clk);
+
+            if (w_seen != exp_w.size())
+                $fatal(1, "%s: missing weight writes exp=%0d got=%0d", name, exp_w.size(), w_seen);
+            if (t_seen != exp_t.size())
+                $fatal(1, "%s: missing threshold writes exp=%0d got=%0d", name, exp_t.size(), t_seen);
+
+            $display("%s PASS", name);
+        end
+    endtask
+
     initial begin
-        // Initialize the class object here
-        gold = new(PW);
+        clk = 1'b0;
 
-        // Init Signals
-        rst = 1; cfg_valid = 0; cfg_rdy = 1;
-        repeat(5) @(posedge clk);
-        rst = 0;
-        
-        // --- T1 & T8: Full 784 -> 256 Layer Config ---
-        $display("\n=== Running T8: Full SFC Layer (784 in -> 256 neu) ===");
-        push_header(0, 0, 784, 256, 98, 25088);
-        for (int i = 0; i < 25088; i++) stream_q.push_back(8'hAA);
-        push_header(1, 0, 0, 256, 4, 1024);
-        for (int i = 0; i < 256; i++) begin
-            stream_q.push_back(i[7:0]);   
-            stream_q.push_back(i[15:8]);
-            stream_q.push_back(8'h00);
-            stream_q.push_back(8'h00);
-        end
+        run_test("basic",          32'd42,   1'b0, 1'b0);
+        run_test("with_gaps",      32'd99,   1'b1, 1'b0);
+        run_test("with_backpress", 32'd2026, 1'b0, 1'b1);
+        run_test("gaps_backpress", 32'd7,    1'b1, 1'b1);
 
-        gold.process(stream_q);
-        
-        fork
-            drive_stream(stream_q);
-            check_results(0);
-        join
-        
-        // --- T4: Threshold Truncation Test ---
-        $display("\n=== Running T4: Threshold Truncation ===");
-        stream_q.delete();
-        push_header(0, 1, 784, 1, 98, 98);
-        for (int i = 0; i < 98; i++) stream_q.push_back(8'h00);
-        push_header(1, 1, 0, 1, 4, 4);
-        stream_q.push_back(8'hEF); stream_q.push_back(8'hBE);
-        stream_q.push_back(8'hAD); stream_q.push_back(8'hDE);
-        
-        gold.process(stream_q);
-        fork
-            drive_stream(stream_q);
-            check_results(1);
-        join
-
-        $display("\n========================================");
-        $display(" Final Results: %0d Tests Passed, %0d Errors", tests_passed, errors);
-        $display("========================================\n");
+        $display("ALL TESTS PASSED");
         $finish;
     end
 
