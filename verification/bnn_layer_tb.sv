@@ -20,8 +20,10 @@ module bnn_layer_tb;
     logic [        NEURONS-1:0] act;
     logic [NEURONS*COUNT_W-1:0] pop;
     logic cfg_we, cfg_tw, cfg_rdy;
-    logic [        7:0] cfg_nidx;
-    logic [        5:0] cfg_addr;
+    //logic [        7:0] cfg_nidx;
+    //logic [        5:0] cfg_addr;
+    logic [$clog2(NEURONS)-1:0] cfg_nidx;
+    logic [$clog2((INPUTS + PW - 1) / PW)-1:0] cfg_addr;
     logic [     PW-1:0] cfg_wdata;
     logic [COUNT_W-1:0] cfg_tdata;
 
