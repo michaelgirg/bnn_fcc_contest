@@ -2,7 +2,7 @@
 
 module config_parser_tb;
 
-    import bnn_config_golden_pkg::*;
+    import bnn_config_pkg::*;
 
     localparam int TARGET_LAYER_ID       = 0;
     localparam int INPUTS                = 784;
