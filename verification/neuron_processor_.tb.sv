@@ -3,6 +3,8 @@
 // Module: neuron_processor_tb
 // Purpose: Comprehensive testbench for neuron_processor with coverage
 // Added:   per-neuron latency tracking and summary report
+// Updated: Pipeline depth corrected to 3-stage (latency-optimized design)
+// Added:   Directed test for full_pipeline_propagation coverage
 // ============================================================================
 module neuron_processor_tb #(
     parameter int PW                         = 8,
@@ -19,7 +21,6 @@ module neuron_processor_tb #(
     parameter int CLK_PERIOD_NS              = 10
 );
     localparam int ACCUM_WIDTH = $clog2(MAX_NEURON_INPUTS + 1);
-
     logic                   clk = 0;
     logic                   rst;
     logic                   valid_in;
@@ -30,24 +31,17 @@ module neuron_processor_tb #(
     logic                   valid_out;
     logic                   activation;
     logic [ACCUM_WIDTH-1:0] popcount_out;
-
     int passed, failed;
-
     event   start_event;
     event   done_event;
-
     mailbox driver_mailbox = new;
     mailbox scoreboard_input_mailbox = new;
     mailbox scoreboard_result_mailbox = new;
-
-    // Latency mailbox: driver sends (start_cycle, num_beats) per neuron
-    // scoreboard reads it to compute latency per test
     typedef struct {
         longint start_cycle;
         int     num_beats;
     } timing_item_t;
     mailbox #(timing_item_t) timing_mailbox = new;
-
     // =========================================================================
     // Free-running cycle counter
     // =========================================================================
@@ -56,7 +50,6 @@ module neuron_processor_tb #(
         if (rst) cycle_count <= 0;
         else cycle_count <= cycle_count + 1;
     end
-
     // =========================================================================
     // DUT
     // =========================================================================
@@ -67,7 +60,6 @@ module neuron_processor_tb #(
     ) DUT (
         .*
     );
-
     // =========================================================================
     // Transaction class
     // =========================================================================
@@ -76,13 +68,11 @@ module neuron_processor_tb #(
         rand bit [         PW-1:0] x_data    [];
         rand bit [         PW-1:0] w_data    [];
         rand bit [ACCUM_WIDTH-1:0] threshold;
-
         constraint valid_beats {num_beats inside {[MIN_BEATS : MAX_BEATS]};}
         constraint array_sizes {
             x_data.size() == num_beats;
             w_data.size() == num_beats;
         }
-
         function int calc_expected_popcount();
             int total = 0;
             for (int i = 0; i < num_beats; i++) begin
@@ -91,12 +81,10 @@ module neuron_processor_tb #(
             end
             return total;
         endfunction
-
         function bit calc_expected_activation();
             return (calc_expected_popcount() >= threshold);
         endfunction
     endclass
-
     // =========================================================================
     // Latency statistics class
     // =========================================================================
@@ -105,21 +93,18 @@ module neuron_processor_tb #(
         int     count;
         int     min_cycles;
         int     max_cycles;
-
         function new();
             total_cycles = 0;
             count        = 0;
             min_cycles   = int'(32'h7FFF_FFFF);
             max_cycles   = 0;
         endfunction
-
         function void record(int cycles);
             total_cycles += cycles;
             count++;
             if (cycles < min_cycles) min_cycles = cycles;
             if (cycles > max_cycles) max_cycles = cycles;
         endfunction
-
         function void report();
             real avg_cycles, avg_ns;
             $display("\n================================================================");
@@ -127,7 +112,7 @@ module neuron_processor_tb #(
             $display("================================================================");
             $display("Config: PW=%0d  MAX_NEURON_INPUTS=%0d  OUTPUT_LAYER=%0d", PW, MAX_NEURON_INPUTS,
                      OUTPUT_LAYER);
-            $display("NP pipeline depth: 3 stages (Stage A: XNOR, Stage B: popcount, Stage C: accum)");
+            $display("NP pipeline depth: 3 stages (A:XNOR  B:popcount  C:accum+compare)");
             $display("Expected min latency for N-beat neuron: N + 3 cycles");
             $display("  Single-beat : %0d cycles", 1 + 3);
             $display("  Max-beat(%0d): %0d cycles", MAX_BEATS, MAX_BEATS + 3);
@@ -146,27 +131,22 @@ module neuron_processor_tb #(
             $display("================================================================\n");
         endfunction
     endclass
-
     LatencyStats lat_stats;
-
     // =========================================================================
-    // Reference model functions
+    // Reference model
     // =========================================================================
     function int model_popcount(neuron_item item);
         return item.calc_expected_popcount();
     endfunction
-
     function bit model_activation(neuron_item item);
         return item.calc_expected_activation();
     endfunction
-
     // =========================================================================
     // Clock
     // =========================================================================
     initial begin : generate_clock
         forever #(CLK_PERIOD_NS / 2) clk <= ~clk;
     end
-
     // =========================================================================
     // Initialization
     // =========================================================================
@@ -182,22 +162,21 @@ module neuron_processor_tb #(
         repeat (5) @(posedge clk);
         rst <= 0;
     end
-
     // =========================================================================
     // Generator
     // =========================================================================
     initial begin : generator
         neuron_item test;
-
+        // Random tests
         for (int i = 0; i < NUM_TESTS; i++) begin
             test = new();
             assert (test.randomize());
             driver_mailbox.put(test);
         end
-
         // ------------------------------------------------------------------
         // Directed corner cases
         // ------------------------------------------------------------------
+        // 2-beat: no-match then full-match
         test = new();
         test.num_beats = 2;
         test.x_data = new[2];
@@ -208,7 +187,7 @@ module neuron_processor_tb #(
         test.w_data[1] = 8'hFF;
         test.threshold = PW;
         driver_mailbox.put(test);
-
+        // 3-beat random
         test = new();
         test.num_beats = 3;
         test.x_data = new[3];
@@ -219,7 +198,7 @@ module neuron_processor_tb #(
         end
         test.threshold = (3 * PW) / 2;
         driver_mailbox.put(test);
-
+        // 4-beat all no-match
         test = new();
         test.num_beats = 4;
         test.x_data = new[4];
@@ -230,7 +209,7 @@ module neuron_processor_tb #(
         end
         test.threshold = PW * 2;
         driver_mailbox.put(test);
-
+        // 5-beat random
         test = new();
         test.num_beats = 5;
         test.x_data = new[5];
@@ -241,7 +220,7 @@ module neuron_processor_tb #(
         end
         test.threshold = (5 * PW) / 2;
         driver_mailbox.put(test);
-
+        // 8-beat continuous operation
         test = new();
         test.num_beats = 8;
         test.x_data = new[8];
@@ -250,9 +229,9 @@ module neuron_processor_tb #(
             test.x_data[i] = 8'hAA;
             test.w_data[i] = 8'h55;
         end
-        test.threshold = 20;
+        test.threshold = 1;
         driver_mailbox.put(test);
-
+        // Max-beat all full-match
         test = new();
         test.num_beats = MAX_BEATS;
         test.x_data = new[MAX_BEATS];
@@ -263,7 +242,7 @@ module neuron_processor_tb #(
         end
         test.threshold = (MAX_BEATS * PW) / 2;
         driver_mailbox.put(test);
-
+        // Threshold exact match (6 bits set)
         test = new();
         test.num_beats = 2;
         test.x_data = new[2];
@@ -274,7 +253,7 @@ module neuron_processor_tb #(
         test.w_data[1] = 8'b11000000;
         test.threshold = 6;
         driver_mailbox.put(test);
-
+        // 7 bits match, threshold=6 → should activate
         test = new();
         test.num_beats = 1;
         test.x_data = new[1];
@@ -283,7 +262,7 @@ module neuron_processor_tb #(
         test.w_data[0] = 8'b11111110;
         test.threshold = 6;
         driver_mailbox.put(test);
-
+        // 5 bits match, threshold=6 → should not activate
         test = new();
         test.num_beats = 1;
         test.x_data = new[1];
@@ -292,7 +271,7 @@ module neuron_processor_tb #(
         test.w_data[0] = 8'b11111000;
         test.threshold = 6;
         driver_mailbox.put(test);
-
+        // All zeros, threshold=0 → should activate
         test = new();
         test.num_beats = 1;
         test.x_data = new[1];
@@ -301,7 +280,7 @@ module neuron_processor_tb #(
         test.w_data[0] = 8'h00;
         test.threshold = 0;
         driver_mailbox.put(test);
-
+        // Max threshold — should never activate
         test = new();
         test.num_beats = MAX_BEATS;
         test.x_data = new[MAX_BEATS];
@@ -312,7 +291,7 @@ module neuron_processor_tb #(
         end
         test.threshold = MAX_BEATS * PW;
         driver_mailbox.put(test);
-
+        // Half-max beats, quarter threshold
         test = new();
         test.num_beats = MAX_BEATS / 2;
         test.x_data = new[MAX_BEATS / 2];
@@ -323,7 +302,7 @@ module neuron_processor_tb #(
         end
         test.threshold = (MAX_BEATS * PW) / 4;
         driver_mailbox.put(test);
-
+        // Near-max popcount (last beat has one mismatch)
         test = new();
         test.num_beats = MAX_BEATS;
         test.x_data = new[MAX_BEATS];
@@ -336,7 +315,7 @@ module neuron_processor_tb #(
         test.w_data[MAX_BEATS-1] = 8'hFE;
         test.threshold = MAX_BEATS * PW - 5;
         driver_mailbox.put(test);
-
+        // Accumulator at max — all full-match, threshold=1
         test = new();
         test.num_beats = MAX_BEATS;
         test.x_data = new[MAX_BEATS];
@@ -348,6 +327,18 @@ module neuron_processor_tb #(
         test.threshold = 1;
         driver_mailbox.put(test);
 
+        // NEW: Full pipeline propagation test - single-beat, no gaps
+        // This ensures full_pipeline_propagation coverage is hit
+        test = new();
+        test.num_beats = 1;
+        test.x_data = new[1];
+        test.w_data = new[1];
+        test.x_data[0] = 8'b10101010;
+        test.w_data[0] = 8'b10101010;
+        test.threshold = 4;
+        driver_mailbox.put(test);
+
+        // Rapid sequence: 5 single-beat full-match neurons
         for (int i = 0; i < 5; i++) begin
             test = new();
             test.num_beats = 1;
@@ -358,7 +349,7 @@ module neuron_processor_tb #(
             test.threshold = 4;
             driver_mailbox.put(test);
         end
-
+        // Rapid sequence: 5 single-beat random neurons
         for (int i = 0; i < 5; i++) begin
             test = new();
             test.num_beats = 1;
@@ -370,7 +361,6 @@ module neuron_processor_tb #(
             driver_mailbox.put(test);
         end
     end
-
     // =========================================================================
     // Start Monitor
     // =========================================================================
@@ -381,7 +371,6 @@ module neuron_processor_tb #(
             ->start_event;
         end
     end
-
     // =========================================================================
     // Done Monitor
     // =========================================================================
@@ -390,12 +379,11 @@ module neuron_processor_tb #(
             @(posedge clk iff !rst && valid_out);
             if (LOG_DONE_MONITOR)
                 $display(
-                    "[%0t] Done monitor: result = %0d, activation = %0b", $realtime, popcount_out, activation
+                    "[%0t] Done monitor: result=%0d activation=%0b", $realtime, popcount_out, activation
                 );
             ->done_event;
         end
     end
-
     // =========================================================================
     // Driver
     // =========================================================================
@@ -404,30 +392,27 @@ module neuron_processor_tb #(
         timing_item_t timing;
         automatic bit first_test = 1'b1;
         automatic int test_count = 0;
-
         @(posedge clk iff !rst);
-
         forever begin
             driver_mailbox.get(item);
             test_count++;
-
             if (!first_test) begin
                 if (test_count > NUM_TESTS + 10) begin
-                    // No delay for rapid sequence tests
+                    // no delay for rapid sequence tests
+                end else if (test_count == NUM_TESTS + 1) begin
+                    // Extra drain gap before directed tests to flush pipeline
+                    // NP pipeline is 3 stages deep so wait at least 4 cycles
+                    repeat (10) @(posedge clk);
                 end else begin
                     repeat ($urandom_range(MIN_CYCLES_BETWEEN_NEURONS, MAX_CYCLES_BETWEEN_NEURONS))
                         @(posedge clk);
                 end
             end
             first_test = 1'b0;
-
             scoreboard_input_mailbox.put(item);
-
-            // Record the cycle on which first valid_in fires
             timing.start_cycle = cycle_count;
             timing.num_beats   = item.num_beats;
             timing_mailbox.put(timing);
-
             for (int beat = 0; beat < item.num_beats; beat++) begin
                 valid_in  <= 1;
                 last      <= (beat == item.num_beats - 1);
@@ -435,27 +420,21 @@ module neuron_processor_tb #(
                 w         <= item.w_data[beat];
                 threshold <= item.threshold;
                 @(posedge clk);
-
-                if (TOGGLE_INPUTS_WHILE_ACTIVE &&
-                    beat < item.num_beats - 1 &&
-                    test_count != (NUM_TESTS + 6) &&
-                    test_count != (NUM_TESTS + 15)) begin
+                if (TOGGLE_INPUTS_WHILE_ACTIVE && beat < item.num_beats - 1 && test_count <= NUM_TESTS) begin
                     valid_in <= 0;
                     x <= $urandom();
                     w <= $urandom();
                     @(posedge clk);
                 end
             end
-
             valid_in <= 0;
             last     <= 0;
             @(posedge clk iff valid_out);
             scoreboard_result_mailbox.put({popcount_out, activation});
         end
     end
-
     // =========================================================================
-    // Scoreboard — checks correctness and records latency
+    // Scoreboard
     // =========================================================================
     initial begin : scoreboard
         neuron_item                     item;
@@ -467,25 +446,18 @@ module neuron_processor_tb #(
         logic                           actual_activation;
         int                             elapsed;
         longint                         done_cycle;
-
         passed = 0;
         failed = 0;
-
-        for (int i = 0; i < NUM_TESTS + 24; i++) begin
+        for (int i = 0; i < NUM_TESTS + 25; i++) begin  // 25 directed tests now
             scoreboard_input_mailbox.get(item);
             scoreboard_result_mailbox.get(result_packet);
             timing_mailbox.get(timing);
-
-            // Cycle when valid_out fired — approximate from current time
-            // (valid_out was sampled by driver before putting result_packet)
-            done_cycle = cycle_count;
-            elapsed    = int'(done_cycle - timing.start_cycle);
-
-            actual_popcount   = result_packet[ACCUM_WIDTH:1];
-            actual_activation = result_packet[0];
-            expected_popcount = model_popcount(item);
+            done_cycle          = cycle_count;
+            elapsed             = int'(done_cycle - timing.start_cycle);
+            actual_popcount     = result_packet[ACCUM_WIDTH:1];
+            actual_activation   = result_packet[0];
+            expected_popcount   = model_popcount(item);
             expected_activation = model_activation(item);
-
             if (OUTPUT_LAYER) begin
                 if (actual_popcount == expected_popcount) begin
                     $display("Test %0d passed (time %0t): popcount=%0d  latency=%0d cycles", i, $time,
@@ -510,37 +482,30 @@ module neuron_processor_tb #(
                 end
             end
         end
-
         $display("========================================");
         $display("Tests completed: %0d passed, %0d failed", passed, failed);
         $display("========================================");
-
         lat_stats.report();
-
         $finish;
     end
-
     // =========================================================================
-    // Assertions
+    // Assertions — 3-stage pipeline
     // =========================================================================
     property p_valid_out_timing;
         @(posedge clk) disable iff (rst) valid_in && last |-> ##3 valid_out;
     endproperty
     assert property (p_valid_out_timing)
     else $error("valid_out not asserted 3 cycles after last");
-
     property p_accumulator_clear;
         @(posedge clk) disable iff (rst) valid_in && last |-> ##4 (DUT.accumulator_r == 0);
     endproperty
     assert property (p_accumulator_clear)
-    else $error("Accumulator not cleared");
-
+    else $error("Accumulator not cleared after 4 cycles");
     property p_valid_out_pulse;
         @(posedge clk) disable iff (rst) valid_out |=> !valid_out;
     endproperty
     assert property (p_valid_out_pulse)
     else $error("valid_out held high too long");
-
     // =========================================================================
     // Coverage
     // =========================================================================
@@ -555,7 +520,6 @@ module neuron_processor_tb #(
         coverpoint activation {bins inactive = {0}; bins active = {1};}
     endgroup
     cg_neuron cov_neuron = new();
-
     single_beat_neuron :
     cover property (@(posedge clk) disable iff (rst) valid_in && last);
     multi_beat_neuron :
@@ -614,7 +578,6 @@ module neuron_processor_tb #(
         (valid_in && !last) ##1 (valid_in && !last) ##1 valid_in);
     rapid_neuron_sequence :
     cover property (@(posedge clk) disable iff (rst) valid_out ##[0:1] valid_out ##[0:1] valid_out);
-
     if (!OUTPUT_LAYER) begin : hidden_layer_coverage
         hidden_layer_activate_at_threshold :
         cover property (@(posedge clk) disable iff (rst)
@@ -626,6 +589,5 @@ module neuron_processor_tb #(
         cover property (@(posedge clk) disable iff (rst)
             valid_out && !activation && (popcount_out < threshold));
     end : hidden_layer_coverage
-
 endmodule
 `default_nettype wire
