@@ -1,10 +1,6 @@
 `default_nettype none
 // ============================================================================
-// Module: bnn_core_tb
-// Purpose: Comprehensive testbench for bnn_core
-// Tests: 3-layer sequencing, inter-layer handoff, warm reset, config routing,
-//        done/result_valid timing, back-to-back inference, capture registers
-// Added: per-inference latency tracking, min/max/avg report at end
+// Module: bnn_core_tb (Complete - All Tests Updated for Latency-Optimized Interface)
 // ============================================================================
 module bnn_core_tb #(
     parameter int INPUTS         = 784,
@@ -30,13 +26,7 @@ module bnn_core_tb #(
             ((L1_COUNT_W > L3_COUNT_W) ? L1_COUNT_W : L3_COUNT_W) :
             ((L2_COUNT_W > L3_COUNT_W) ? L2_COUNT_W : L3_COUNT_W);
     localparam int POPCOUNT_OUT_W = OUTPUTS * L3_COUNT_W;
-    localparam int L1_ACT_W = HIDDEN1;
-    localparam int L2_ACT_W = HIDDEN2;
-    localparam int MAX_NEURONS =
-        (HIDDEN1 > HIDDEN2) ?
-            ((HIDDEN1 > OUTPUTS) ? HIDDEN1 : OUTPUTS) :
-            ((HIDDEN2 > OUTPUTS) ? HIDDEN2 : OUTPUTS);
-    localparam int CFG_NEURON_W = (MAX_NEURONS > 1) ? $clog2(MAX_NEURONS) : 1;
+    localparam int GLOBAL_NEURON_W = $clog2(HIDDEN1 + HIDDEN2 + OUTPUTS);
     localparam int MAX_BEATS_L1 = (INPUTS + PW - 1) / PW;
     localparam int MAX_BEATS_L2 = (HIDDEN1 + PW - 1) / PW;
     localparam int MAX_BEATS_L3 = (HIDDEN2 + PW - 1) / PW;
@@ -47,41 +37,37 @@ module bnn_core_tb #(
     localparam int CFG_WEIGHT_ADDR_W = (MAX_WEIGHT_BEATS > 1) ? $clog2(MAX_WEIGHT_BEATS) : 1;
 
     // =========================================================================
-    // DUT signals
+    // DUT signals - UPDATED to match latency-optimized bnn_core
     // =========================================================================
     logic                         clk = 0;
     logic                         rst;
-    logic                         start;
-    logic [           INPUTS-1:0] input_vector;
+    logic [           INPUTS-1:0] image_input;
+    logic                         image_valid;
+    logic                         image_ready;
     logic                         done;
-    logic                         busy;
     logic                         result_valid;
-    logic [   POPCOUNT_OUT_W-1:0] popcounts_out;
-    logic [         L1_ACT_W-1:0] activations_l1;
-    logic [         L2_ACT_W-1:0] activations_l2;
+    logic [   POPCOUNT_OUT_W-1:0] result_popcounts;
+    logic [          OUTPUTS-1:0] result_activations;
     logic                         cfg_write_en;
-    logic [                  1:0] cfg_layer_sel;
-    logic [     CFG_NEURON_W-1:0] cfg_neuron_idx;
+    logic [  GLOBAL_NEURON_W-1:0] cfg_global_neuron_idx;
     logic [CFG_WEIGHT_ADDR_W-1:0] cfg_weight_addr;
     logic [               PW-1:0] cfg_weight_data;
     logic [      THRESHOLD_W-1:0] cfg_threshold_data;
     logic                         cfg_threshold_write;
-    logic                         cfg_ready;
+
+    // Derived signal for compatibility
+    logic                         busy;
+    assign busy = !image_ready;
 
     int passed, failed;
-
-    event                                 inference_done_event;
-    event                                 cfg_done_event;
-    event                                 reset_event;
-
-    mailbox #(logic [        INPUTS-1:0]) input_mailbox = new;
-    mailbox #(logic [POPCOUNT_OUT_W-1:0]) result_mailbox = new;
-    mailbox #(logic [POPCOUNT_OUT_W-1:0]) expected_mailbox = new;
+    event   inference_done_event;
+    event   cfg_done_event;
+    event   reset_event;
 
     // =========================================================================
     // Free-running cycle counter for latency measurement
     // =========================================================================
-    longint                               cycle_count;
+    longint cycle_count;
     always_ff @(posedge clk) begin
         if (rst) cycle_count <= 0;
         else cycle_count <= cycle_count + 1;
@@ -98,24 +84,21 @@ module bnn_core_tb #(
         .PW     (PW),
         .PN     (PN)
     ) DUT (
-        .clk                (clk),
-        .rst                (rst),
-        .start              (start),
-        .input_vector       (input_vector),
-        .done               (done),
-        .busy               (busy),
-        .result_valid       (result_valid),
-        .popcounts_out      (popcounts_out),
-        .activations_l1     (activations_l1),
-        .activations_l2     (activations_l2),
-        .cfg_write_en       (cfg_write_en),
-        .cfg_layer_sel      (cfg_layer_sel),
-        .cfg_neuron_idx     (cfg_neuron_idx),
-        .cfg_weight_addr    (cfg_weight_addr),
-        .cfg_weight_data    (cfg_weight_data),
-        .cfg_threshold_data (cfg_threshold_data),
-        .cfg_threshold_write(cfg_threshold_write),
-        .cfg_ready          (cfg_ready)
+        .clk                  (clk),
+        .rst                  (rst),
+        .image_input          (image_input),
+        .image_valid          (image_valid),
+        .image_ready          (image_ready),
+        .result_activations   (result_activations),
+        .result_popcounts     (result_popcounts),
+        .result_valid         (result_valid),
+        .done                 (done),
+        .cfg_write_en         (cfg_write_en),
+        .cfg_global_neuron_idx(cfg_global_neuron_idx),
+        .cfg_weight_addr      (cfg_weight_addr),
+        .cfg_weight_data      (cfg_weight_data),
+        .cfg_threshold_data   (cfg_threshold_data),
+        .cfg_threshold_write  (cfg_threshold_write)
     );
 
     // =========================================================================
@@ -126,25 +109,22 @@ module bnn_core_tb #(
         int     count;
         int     min_cycles;
         int     max_cycles;
-
         function new();
             total_cycles = 0;
             count        = 0;
             min_cycles   = int'(32'h7FFF_FFFF);
             max_cycles   = 0;
         endfunction
-
         function void record(int cycles);
             total_cycles += cycles;
             count++;
             if (cycles < min_cycles) min_cycles = cycles;
             if (cycles > max_cycles) max_cycles = cycles;
         endfunction
-
         function void report();
             real avg_cycles, avg_ns, throughput_per_us;
             $display("\n========================================================");
-            $display("LATENCY REPORT  (start -> done, passing inferences only)");
+            $display("LATENCY REPORT  (image_valid -> done, passing inferences only)");
             $display("========================================================");
             $display("Config: INPUTS=%0d  HIDDEN1=%0d  HIDDEN2=%0d  OUTPUTS=%0d", INPUTS, HIDDEN1, HIDDEN2,
                      OUTPUTS);
@@ -173,27 +153,11 @@ module bnn_core_tb #(
             $display("========================================================");
         endfunction
     endclass
-
     LatencyStats lat_stats;
 
     // =========================================================================
     // Model and inference helper classes
     // =========================================================================
-    class weight_row_item;
-        logic [PW-1:0] beats     [];
-        int            num_beats;
-        function new(int nb);
-            num_beats = nb;
-            beats     = new[nb];
-        endfunction
-        function void randomize_beats();
-            for (int i = 0; i < num_beats; i++) beats[i] = $urandom();
-        endfunction
-        function void set_all(logic [PW-1:0] val);
-            for (int i = 0; i < num_beats; i++) beats[i] = val;
-        endfunction
-    endclass
-
     class model_item;
         logic [         PW-1:0] weights      [3] [] [];
         logic [THRESHOLD_W-1:0] thresholds   [3] [];
@@ -235,14 +199,6 @@ module bnn_core_tb #(
         endfunction
     endclass
 
-    class inference_item;
-        logic [        INPUTS-1:0] input_vec;
-        logic [POPCOUNT_OUT_W-1:0] expected_popcounts;
-        function new();
-            for (int i = 0; i < INPUTS; i++) input_vec[i] = $urandom_range(0, 1);
-        endfunction
-    endclass
-
     // =========================================================================
     // Reference model
     // =========================================================================
@@ -251,7 +207,6 @@ module bnn_core_tb #(
         automatic logic [       HIDDEN1-1:0] l1_act;
         automatic logic [       HIDDEN2-1:0] l2_act;
         automatic logic [POPCOUNT_OUT_W-1:0] out_pops;
-
         for (int n = 0; n < HIDDEN1; n++) begin
             automatic int popcount = 0;
             for (int b = 0; b < MAX_BEATS_L1; b++) begin
@@ -266,7 +221,6 @@ module bnn_core_tb #(
             end
             l1_act[n] = (popcount >= mdl.thresholds[0][n]);
         end
-
         for (int n = 0; n < HIDDEN2; n++) begin
             automatic int popcount = 0;
             for (int b = 0; b < MAX_BEATS_L2; b++) begin
@@ -281,7 +235,6 @@ module bnn_core_tb #(
             end
             l2_act[n] = (popcount >= mdl.thresholds[1][n]);
         end
-
         for (int n = 0; n < OUTPUTS; n++) begin
             automatic int popcount = 0;
             for (int b = 0; b < MAX_BEATS_L3; b++) begin
@@ -309,74 +262,114 @@ module bnn_core_tb #(
     // =========================================================================
     initial begin
         $timeformat(-9, 0, " ns");
-        passed              = 0;
-        failed              = 0;
-        lat_stats           = new();
-        rst                 = 1;
-        start               = 0;
-        input_vector        = '0;
-        cfg_write_en        = 0;
-        cfg_layer_sel       = '0;
-        cfg_neuron_idx      = '0;
-        cfg_weight_addr     = '0;
-        cfg_weight_data     = '0;
-        cfg_threshold_data  = '0;
-        cfg_threshold_write = 0;
+        passed                = 0;
+        failed                = 0;
+        lat_stats             = new();
+
+        // Initialize testbench signals
+        rst                   = 1;
+        image_valid           = 0;
+        image_input           = '0;
+        cfg_write_en          = 0;
+        cfg_global_neuron_idx = '0;
+        cfg_weight_addr       = '0;
+        cfg_weight_data       = '0;
+        cfg_threshold_data    = '0;
+        cfg_threshold_write   = 0;
+
+        // CRITICAL FIX: Force all layer RAMs to zero before any operations
+        // This prevents X-propagation and ensures deterministic behavior
+        $display("[%0t] Initializing all weight and threshold RAMs to zero...", $realtime);
+
+        force DUT.layer1.weight_rams = '{default: '0};
+        force DUT.layer1.threshold_rams = '{default: '0};
+        force DUT.layer2.weight_rams = '{default: '0};
+        force DUT.layer2.threshold_rams = '{default: '0};
+        force DUT.layer3.weight_rams = '{default: '0};
+        force DUT.layer3.threshold_rams = '{default: '0};
+
+        #1;  // Wait 1 time unit for forces to take effect
+
+        // Release RAMs for normal operation
+        release DUT.layer1.weight_rams;
+        release DUT.layer1.threshold_rams;
+        release DUT.layer2.weight_rams;
+        release DUT.layer2.threshold_rams;
+        release DUT.layer3.weight_rams;
+        release DUT.layer3.threshold_rams;
+
+        $display("[%0t] RAM initialization complete", $realtime);
+
+        // Apply reset
         repeat (5) @(posedge clk);
         rst = 0;
         @(posedge clk);
+
+        $display("[%0t] Reset released, testbench ready", $realtime);
     end
 
     // =========================================================================
-    // Tasks
+    // Tasks - UPDATED for new interface
     // =========================================================================
-    task automatic write_model(input model_item mdl);
-        for (int l = 0; l < 3; l++) begin
-            for (int n = 0; n < mdl.layer_neurons[l]; n++) begin
-                for (int b = 0; b < mdl.layer_beats[l]; b++) begin
-                    @(posedge clk iff cfg_ready);
-                    cfg_write_en        <= 1'b1;
-                    cfg_threshold_write <= 1'b0;
-                    cfg_layer_sel       <= 2'(l);
-                    cfg_neuron_idx      <= CFG_NEURON_W'(n);
-                    cfg_weight_addr     <= CFG_WEIGHT_ADDR_W'(b);
-                    cfg_weight_data     <= mdl.weights[l][n][b];
-                    cfg_threshold_data  <= '0;
-                end
-                @(posedge clk iff cfg_ready);
-                cfg_write_en        <= 1'b0;
-                cfg_threshold_write <= 1'b1;
-                cfg_layer_sel       <= 2'(l);
-                cfg_neuron_idx      <= CFG_NEURON_W'(n);
-                cfg_weight_addr     <= '0;
-                cfg_weight_data     <= '0;
-                cfg_threshold_data  <= mdl.thresholds[l][n];
+   task automatic write_model(input model_item mdl);
+    automatic int layer_base[3];
+    layer_base[0] = 0;
+    layer_base[1] = HIDDEN1;
+    layer_base[2] = HIDDEN1 + HIDDEN2;
+    
+    for (int l = 0; l < 3; l++) begin
+        for (int n = 0; n < mdl.layer_neurons[l]; n++) begin
+            automatic int global_idx = layer_base[l] + n;
+            
+            // Write all weight beats for this neuron
+            for (int b = 0; b < mdl.layer_beats[l]; b++) begin
+                @(posedge clk iff image_ready);
+                // Use blocking assignments for config (immediate effect)
+                cfg_write_en          = 1'b1;
+                cfg_threshold_write   = 1'b0;
+                cfg_global_neuron_idx = GLOBAL_NEURON_W'(global_idx);
+                cfg_weight_addr       = CFG_WEIGHT_ADDR_W'(b);
+                cfg_weight_data       = mdl.weights[l][n][b];
+                cfg_threshold_data    = '0;
             end
+            
+            // Write threshold for this neuron  
+            @(posedge clk iff image_ready);
+            cfg_write_en          = 1'b0;
+            cfg_threshold_write   = 1'b1;
+            cfg_global_neuron_idx = GLOBAL_NEURON_W'(global_idx);
+            cfg_weight_addr       = '0;
+            cfg_weight_data       = '0;
+            cfg_threshold_data    = mdl.thresholds[l][n];
         end
-        @(posedge clk);
-        cfg_write_en        <= 1'b0;
-        cfg_threshold_write <= 1'b0;
-        cfg_layer_sel       <= '0;
-        cfg_neuron_idx      <= '0;
-        cfg_weight_addr     <= '0;
-        cfg_weight_data     <= '0;
-        cfg_threshold_data  <= '0;
-        if (LOG_CFG) $display("[%0t] Model write complete", $realtime);
-        ->cfg_done_event;
-    endtask
+    end
+    
+    // Extra cycle to let last threshold write complete
+    @(posedge clk);
+    cfg_write_en          = 1'b0;
+    cfg_threshold_write   = 1'b0;
+    cfg_global_neuron_idx = '0;
+    cfg_weight_addr       = '0;
+    cfg_weight_data       = '0;
+    cfg_threshold_data    = '0;
+    
+    // Additional settling cycles
+    repeat (2) @(posedge clk);
+    
+    if (LOG_CFG) $display("[%0t] Model write complete", $realtime);
+    ->cfg_done_event;
+endtask
 
-    // run_inference: drives one inference and records latency in lat_stats
     task automatic run_inference(input logic [INPUTS-1:0] in_vec);
         longint t_start, t_done;
         int elapsed;
-
-        @(posedge clk iff !busy);
-        input_vector <= in_vec;
+        @(posedge clk iff image_ready);
+        image_input <= in_vec;
         @(posedge clk);
         t_start = cycle_count;
-        start <= 1;
+        image_valid <= 1;
         @(posedge clk);
-        start <= 0;
+        image_valid <= 0;
         if (LOG_INFERENCE) $display("[%0t] Inference started (cycle %0d)", $realtime, t_start);
         @(posedge clk iff done);
         t_done  = cycle_count;
@@ -394,11 +387,11 @@ module bnn_core_tb #(
     endtask
 
     task automatic check_result(input string test_name, input logic [POPCOUNT_OUT_W-1:0] expected);
-        if (popcounts_out === expected) begin
-            $display("[PASS] %s: popcounts_out = %0h", test_name, popcounts_out);
+        if (result_popcounts === expected) begin
+            $display("[PASS] %s: result_popcounts = %0h", test_name, result_popcounts);
             passed++;
         end else begin
-            $display("[FAIL] %s: got %0h, expected %0h", test_name, popcounts_out, expected);
+            $display("[FAIL] %s: got %0h, expected %0h", test_name, result_popcounts, expected);
             failed++;
         end
     endtask
@@ -414,7 +407,7 @@ module bnn_core_tb #(
     endtask
 
     // =========================================================================
-    // Main test sequence
+    // Main test sequence - ALL 16 TESTS
     // =========================================================================
     initial begin : test_sequence
         model_item                      mdl;
@@ -514,11 +507,11 @@ module bnn_core_tb #(
             $display("[PASS] Test7: result_valid stable after done");
             passed++;
         end
-        if (popcounts_out === expected) begin
-            $display("[PASS] Test7: popcounts_out stable during result_valid");
+        if (result_popcounts === expected) begin
+            $display("[PASS] Test7: result_popcounts stable during result_valid");
             passed++;
         end else begin
-            $display("[FAIL] Test7: popcounts_out changed while result_valid high");
+            $display("[FAIL] Test7: result_popcounts changed while result_valid high");
             failed++;
         end
 
@@ -528,12 +521,12 @@ module bnn_core_tb #(
         mdl.randomize_model();
         write_model(mdl);
         for (int i = 0; i < INPUTS; i++) test_input[i] = $urandom_range(0, 1);
-        @(posedge clk iff !busy);
-        input_vector <= test_input;
+        @(posedge clk iff image_ready);
+        image_input <= test_input;
         @(posedge clk);
-        start <= 1;
+        image_valid <= 1;
         @(posedge clk);
-        start <= 0;
+        image_valid <= 0;
         @(posedge clk iff done);
         @(posedge clk);
         if (done) begin
@@ -545,42 +538,42 @@ module bnn_core_tb #(
         end
 
         // ------------------------------------------------------------------
-        $display("\n=== TEST 9: start ignored while busy ===");
+        $display("\n=== TEST 9: image_valid ignored while busy ===");
         mdl = new();
         mdl.randomize_model();
         write_model(mdl);
         for (int i = 0; i < INPUTS; i++) test_input[i] = $urandom_range(0, 1);
-        @(posedge clk iff !busy);
-        input_vector <= test_input;
+        @(posedge clk iff image_ready);
+        image_input <= test_input;
         @(posedge clk);
-        start <= 1;
+        image_valid <= 1;
         @(posedge clk);
-        start <= 1;
+        image_valid <= 1;  // Extra pulse while busy
         @(posedge clk);
-        start <= 0;
+        image_valid <= 0;
         @(posedge clk iff done);
-        $display("[PASS] Test9: DUT completed normally despite extra start pulse");
+        $display("[PASS] Test9: DUT completed normally despite extra image_valid pulse");
         passed++;
 
         // ------------------------------------------------------------------
-        $display("\n=== TEST 10: result_valid clears on new start ===");
+        $display("\n=== TEST 10: result_valid clears on new image_valid ===");
         mdl = new();
         mdl.randomize_model();
         write_model(mdl);
         for (int i = 0; i < INPUTS; i++) test_input[i] = $urandom_range(0, 1);
         run_inference(test_input);
-        @(posedge clk iff !busy);
-        input_vector <= test_input;
+        @(posedge clk iff image_ready);
+        image_input <= test_input;
         @(posedge clk);
-        start <= 1;
+        image_valid <= 1;
         @(posedge clk);
-        start <= 0;
+        image_valid <= 0;
         @(posedge clk);
         if (result_valid) begin
-            $display("[FAIL] Test10: result_valid did not clear after new start");
+            $display("[FAIL] Test10: result_valid did not clear after new image_valid");
             failed++;
         end else begin
-            $display("[PASS] Test10: result_valid cleared on new start");
+            $display("[PASS] Test10: result_valid cleared on new image_valid");
             passed++;
         end
         @(posedge clk iff done);
@@ -602,15 +595,15 @@ module bnn_core_tb #(
         mdl.randomize_model();
         write_model(mdl);
         for (int i = 0; i < INPUTS; i++) test_input[i] = $urandom_range(0, 1);
-        @(posedge clk iff !busy);
-        input_vector <= test_input;
+        @(posedge clk iff image_ready);
+        image_input <= test_input;
         @(posedge clk);
-        start <= 1;
+        image_valid <= 1;
         @(posedge clk);
-        start <= 0;
+        image_valid <= 0;
         repeat (100) @(posedge clk);
         do_reset(3);
-        if (!cfg_ready) begin
+        if (!image_ready) begin
             $display("[FAIL] Test12: DUT not idle after reset");
             failed++;
         end else begin
@@ -636,10 +629,10 @@ module bnn_core_tb #(
             write_model(mdl_a);
             write_model(mdl_b);
             run_inference(test_input);
-            if (popcounts_out === expected_b) begin
+            if (result_popcounts === expected_b) begin
                 $display("[PASS] Test13: Config overwrite correct — model B result");
                 passed++;
-            end else if (popcounts_out === expected_a) begin
+            end else if (result_popcounts === expected_a) begin
                 $display("[FAIL] Test13: Got model A result — overwrite failed");
                 failed++;
             end else begin
@@ -654,19 +647,18 @@ module bnn_core_tb #(
         mdl.randomize_model();
         write_model(mdl);
         for (int i = 0; i < INPUTS; i++) test_input[i] = $urandom_range(0, 1);
-        @(posedge clk iff !busy);
-        input_vector <= test_input;
+        @(posedge clk iff image_ready);
+        image_input <= test_input;
         @(posedge clk);
-        start <= 1;
+        image_valid <= 1;
         @(posedge clk);
-        start <= 0;
+        image_valid <= 0;
         @(posedge clk);
-        cfg_write_en        <= 1;
-        cfg_layer_sel       <= 2'd0;
-        cfg_neuron_idx      <= '0;
-        cfg_weight_addr     <= '0;
-        cfg_weight_data     <= 8'hBE;
-        cfg_threshold_write <= 0;
+        cfg_write_en          <= 1;
+        cfg_global_neuron_idx <= '0;
+        cfg_weight_addr       <= '0;
+        cfg_weight_data       <= 8'hBE;
+        cfg_threshold_write   <= 0;
         @(posedge clk);
         cfg_write_en <= 0;
         @(posedge clk iff done);
@@ -674,20 +666,18 @@ module bnn_core_tb #(
         passed++;
 
         // ------------------------------------------------------------------
-        // Tests 15 and 16 use explicit cycle timestamps for clean reporting
-        // ------------------------------------------------------------------
         $display("\n=== TEST 15: Latency measurement ===");
         mdl = new();
         mdl.randomize_model();
         write_model(mdl);
         for (int i = 0; i < INPUTS; i++) test_input[i] = $urandom_range(0, 1);
-        @(posedge clk iff !busy);
-        input_vector <= test_input;
+        @(posedge clk iff image_ready);
+        image_input <= test_input;
         @(posedge clk);
         t_start = cycle_count;
-        start <= 1;
+        image_valid <= 1;
         @(posedge clk);
-        start <= 0;
+        image_valid <= 0;
         @(posedge clk iff done);
         t_done  = cycle_count;
         elapsed = int'(t_done - t_start);
@@ -695,13 +685,14 @@ module bnn_core_tb #(
                  real'(elapsed) * CLK_PERIOD_NS);
         passed++;
 
+        // ------------------------------------------------------------------
         $display("\n=== TEST 16: Back-to-back throughput measurement ===");
         mdl = new();
         mdl.randomize_model();
         write_model(mdl);
         for (int i = 0; i < INPUTS; i++) test_input[i] = $urandom_range(0, 1);
         expected = run_reference_model(test_input, mdl);
-        run_inference(test_input);  // warmup — also recorded in lat_stats
+        run_inference(test_input);  // warmup - also recorded in lat_stats
         t_start = cycle_count;
         run_inference(test_input);  // second inference
         t_done  = cycle_count;
@@ -709,7 +700,6 @@ module bnn_core_tb #(
         check_result("Test16_throughput_second", expected);
         $display("[INFO] Test16: Back-to-back cycle gap = %0d cycles  (%0.1f ns)", elapsed,
                  real'(elapsed) * CLK_PERIOD_NS);
-
         @(posedge clk);
 
         // ------------------------------------------------------------------
@@ -720,9 +710,7 @@ module bnn_core_tb #(
         $display("Tests passed: %0d", passed);
         $display("Tests failed: %0d", failed);
         $display("========================================");
-
         lat_stats.report();
-
         $finish;
     end
 
@@ -734,9 +722,9 @@ module bnn_core_tb #(
             @(posedge clk iff !rst && done);
             if (LOG_RESULT)
                 $display(
-                    "[%0t] Done monitor: popcounts_out = %0h, result_valid = %0b",
+                    "[%0t] Done monitor: result_popcounts = %0h, result_valid = %0b",
                     $realtime,
-                    popcounts_out,
+                    result_popcounts,
                     result_valid
                 );
             ->inference_done_event;
@@ -751,12 +739,12 @@ module bnn_core_tb #(
     else $error("done held high for more than one cycle");
 
     p_result_valid_stable :
-    assert property (@(posedge clk) disable iff (rst) (result_valid && !start) |=> result_valid)
-    else $error("result_valid dropped without start");
+    assert property (@(posedge clk) disable iff (rst) (result_valid && !image_valid) |=> result_valid)
+    else $error("result_valid dropped without image_valid");
 
     p_result_valid_clears :
-    assert property (@(posedge clk) disable iff (rst) (result_valid && start && !busy) |=> !result_valid)
-    else $error("result_valid did not clear after start");
+    assert property (@(posedge clk) disable iff (rst) (result_valid && image_valid && image_ready) |=> !result_valid)
+    else $error("result_valid did not clear after image_valid");
 
     p_done_sets_result_valid :
     assert property (@(posedge clk) disable iff (rst) done |=> result_valid)
@@ -766,18 +754,20 @@ module bnn_core_tb #(
     assert property (@(posedge clk) disable iff (rst) done |=> !busy)
     else $error("busy still high after done");
 
-    p_cfg_ready_only_in_idle :
-    assert property (@(posedge clk) disable iff (rst) cfg_ready |-> (DUT.state_r == DUT.IDLE))
-    else $error("cfg_ready asserted outside IDLE");
+    p_image_ready_only_in_idle :
+    assert property (@(posedge clk) disable iff (rst) image_ready |-> (DUT.state_r == DUT.IDLE))
+    else $error("image_ready asserted outside IDLE");
 
-    p_start_ignored_while_busy :
+    p_image_valid_ignored_while_busy :
     assert property (@(posedge clk) disable iff (rst)
-        (start && busy) |=> (DUT.state_r != DUT.RUN_L1 || DUT.state_prev_r == DUT.RUN_L1))
-    else $error("spurious RUN_L1 entry after start-while-busy");
+        (image_valid && busy) |=> (DUT.state_r != DUT.RUN_L1 || DUT.state_prev_r == DUT.RUN_L1))
+    else $error("spurious RUN_L1 entry after image_valid-while-busy");
 
-    p_popcounts_stable :
-    assert property (@(posedge clk) disable iff (rst) (result_valid && !start) |=> $stable(popcounts_out))
-    else $error("popcounts_out changed while result_valid and no new start");
+    p_result_popcounts_stable :
+    assert property (@(posedge clk) disable iff (rst) (result_valid && !image_valid) |=> $stable(
+        result_popcounts
+    ))
+    else $error("result_popcounts changed while result_valid and no new image_valid");
 
     p_cfg_blocked_when_busy :
     assert property (@(posedge clk) disable iff (rst)
@@ -789,7 +779,7 @@ module bnn_core_tb #(
     // =========================================================================
     covergroup cg_inference @(inference_done_event);
         option.per_instance = 1;
-        coverpoint popcounts_out[L3_COUNT_W-1:0] {
+        coverpoint result_popcounts[L3_COUNT_W-1:0] {
             bins low = {[0 : HIDDEN2 / 4]};
             bins mid = {[HIDDEN2 / 4 + 1 : 3 * HIDDEN2 / 4]};
             bins high = {[3 * HIDDEN2 / 4 + 1 : HIDDEN2]};
@@ -809,33 +799,38 @@ module bnn_core_tb #(
     // Cover points
     // =========================================================================
     cp_idle_start :
-    cover property (@(posedge clk) disable iff (rst) DUT.state_r == DUT.IDLE && start);
+    cover property (@(posedge clk) disable iff (rst) DUT.state_r == DUT.IDLE && image_valid);
+
     cp_run_l1 :
     cover property (@(posedge clk) disable iff (rst) DUT.state_r == DUT.RUN_L1);
+
     cp_run_l2 :
     cover property (@(posedge clk) disable iff (rst) DUT.state_r == DUT.RUN_L2);
+
     cp_run_l3 :
     cover property (@(posedge clk) disable iff (rst) DUT.state_r == DUT.RUN_L3);
+
     cp_l1_done :
     cover property (@(posedge clk) disable iff (rst) DUT.l1_done);
+
     cp_l2_done :
     cover property (@(posedge clk) disable iff (rst) DUT.l2_done);
+
     cp_l3_done :
     cover property (@(posedge clk) disable iff (rst) DUT.l3_done);
+
     cp_back_to_back :
-    cover property (@(posedge clk) disable iff (rst) done ##[1:3] start);
+    cover property (@(posedge clk) disable iff (rst) done ##[1:3] image_valid);
+
     cp_reset_while_busy :
     cover property (@(posedge clk) busy ##1 rst);
+
     cp_cfg_write_while_ready :
-    cover property (@(posedge clk) disable iff (rst) cfg_write_en && cfg_ready);
-    cp_cfg_layer0 :
-    cover property (@(posedge clk) disable iff (rst) cfg_write_en && (cfg_layer_sel == 2'd0));
-    cp_cfg_layer1 :
-    cover property (@(posedge clk) disable iff (rst) cfg_write_en && (cfg_layer_sel == 2'd1));
-    cp_cfg_layer2 :
-    cover property (@(posedge clk) disable iff (rst) cfg_write_en && (cfg_layer_sel == 2'd2));
+    cover property (@(posedge clk) disable iff (rst) cfg_write_en && image_ready);
+
     cp_result_valid_sustained :
     cover property (@(posedge clk) disable iff (rst) result_valid [* 5]);
+
     cp_done_then_valid :
     cover property (@(posedge clk) disable iff (rst) done ##1 result_valid);
 
