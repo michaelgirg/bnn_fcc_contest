@@ -1,6 +1,6 @@
 `default_nettype none
 // =============================================================================
-// Module: bnn_layer (CORRECTED: Removed initial block to avoid multiple drivers)
+// Module: bnn_layer (FIXED for BRAM inference and timing)
 // =============================================================================
 module bnn_layer #(
     parameter int INPUTS                = 784,
@@ -62,6 +62,7 @@ module bnn_layer #(
     function automatic int get_np_idx(input int neuron_idx);
         return neuron_idx % PN;
     endfunction
+    
     function automatic int get_group_idx(input int neuron_idx);
         return neuron_idx / PN;
     endfunction
@@ -79,6 +80,7 @@ module bnn_layer #(
     logic                                     all_groups_done;
     logic                                     all_np_done;
     logic   [$clog2(NP_PIPELINE_DEPTH+1)-1:0] drain_cnt_r;
+
     assign all_groups_done = (group_idx_r == LAST_GROUP_IDX);
 
     // ---------------------------------------------------------------------------
@@ -86,63 +88,106 @@ module bnn_layer #(
     // ---------------------------------------------------------------------------
     logic [           PW-1:0] input_buffer        [INPUT_BEATS];
     logic [PADDED_INPUTS-1:0] input_vector_padded;
+
     assign input_vector_padded = {{(PADDED_INPUTS - INPUTS) {1'b0}}, input_vector};
+
     always_ff @(posedge clk) begin
         if (input_load && !busy) begin
-            for (int i = 0; i < INPUT_BEATS; i++) input_buffer[i] <= input_vector_padded[i*PW+:PW];
+            for (int i = 0; i < INPUT_BEATS; i++) 
+                input_buffer[i] <= input_vector_padded[i*PW+:PW];
         end
     end
 
+    // ===========================================================================
+    // CRITICAL FIX #1: Convert 3D arrays to separate 2D arrays with BRAM attributes
+    // ===========================================================================
+    generate
+        for (genvar i = 0; i < PN; i++) begin : gen_memories
+            // Separate weight RAM for each NP with BRAM inference attribute
+            (* ram_style = "block" *) logic [PW-1:0] weight_ram [WEIGHT_DEPTH];
+            
+            // Separate threshold RAM for each NP with BRAM inference attribute
+            (* ram_style = "block" *) logic [COUNT_WIDTH-1:0] threshold_ram [NEURON_GROUPS];
+        end
+    endgenerate
+
     // ---------------------------------------------------------------------------
-    // Weight and threshold RAMs
-    // NOTE: No initialization here - testbench must configure all weights/thresholds
-    //       before inference. This avoids multiple driver issues with initial blocks.
+    // Configuration write logic (SIMPLIFIED)
     // ---------------------------------------------------------------------------
-    logic [         PW-1:0] weight_rams   [PN][ WEIGHT_DEPTH];
-    logic [COUNT_WIDTH-1:0] threshold_rams[PN][NEURON_GROUPS];
+    logic [CFG_NEURON_WIDTH-1:0] cfg_np_idx_r;
+    logic [GROUP_WIDTH-1:0]      cfg_grp_idx_r;
+    logic [WEIGHT_ADDR_WIDTH-1:0] cfg_local_addr_r;
+
+    // Pre-compute configuration indices in combinational logic
+    always_comb begin
+        cfg_np_idx_r = CFG_NEURON_WIDTH'(get_np_idx(int'(cfg_neuron_idx)));
+        cfg_grp_idx_r = GROUP_WIDTH'(get_group_idx(int'(cfg_neuron_idx)));
+        cfg_local_addr_r = WEIGHT_ADDR_WIDTH'(int'(cfg_grp_idx_r) * INPUT_BEATS + int'(cfg_weight_addr));
+    end
 
     // Configuration writes (only when idle)
-    always_ff @(posedge clk) begin
-        if (!busy) begin
-            automatic int np_idx = get_np_idx(int'(cfg_neuron_idx));
-            automatic int grp_idx = get_group_idx(int'(cfg_neuron_idx));
-            automatic int local_addr = grp_idx * INPUT_BEATS + int'(cfg_weight_addr);
-            if (cfg_threshold_write && !cfg_write_en) begin
-                threshold_rams[np_idx][grp_idx] <= cfg_threshold_data;
-            end else if (cfg_write_en && !cfg_threshold_write) begin
-                weight_rams[np_idx][local_addr] <= cfg_weight_data;
+    generate
+        for (genvar i = 0; i < PN; i++) begin : gen_cfg_write
+            always_ff @(posedge clk) begin
+                if (!busy) begin
+                    if (cfg_threshold_write && !cfg_write_en && (cfg_np_idx_r == i)) begin
+                        gen_memories[i].threshold_ram[cfg_grp_idx_r] <= cfg_threshold_data;
+                    end else if (cfg_write_en && !cfg_threshold_write && (cfg_np_idx_r == i)) begin
+                        gen_memories[i].weight_ram[cfg_local_addr_r] <= cfg_weight_data;
+                    end
+                end
             end
         end
-    end
+    endgenerate
 
-    // ---------------------------------------------------------------------------
-    // Registered weight read address
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
+    // CRITICAL FIX #2: Add registered memory read stage
+    // ===========================================================================
+    
+    // Address registers
     logic [WEIGHT_ADDR_WIDTH-1:0] weight_rd_addr_r [PN];
     logic [ INPUT_ADDR_WIDTH-1:0] input_rd_addr_r;
-    logic [               PW-1:0] np_weight_in     [PN];
-    logic [               PW-1:0] np_input_in;
-    logic [      COUNT_WIDTH-1:0] np_threshold_in  [PN];
-    logic                         np_valid_in;
-    logic                         np_last;
-    logic [      COUNT_WIDTH-1:0] threshold_cache_r[PN];
+    
+    // Memory output registers (critical for BRAM timing)
+    logic [         PW-1:0] weight_mem_out_r [PN];
+    logic [COUNT_WIDTH-1:0] threshold_mem_out_r [PN];
+    
+    // NP inputs (one more pipeline stage)
+    logic [         PW-1:0] np_weight_in     [PN];
+    logic [         PW-1:0] np_input_in;
+    logic [COUNT_WIDTH-1:0] np_threshold_in  [PN];
+    logic                   np_valid_in;
+    logic                   np_last;
+
+    // Read from memories with registered outputs
+    generate
+        for (genvar i = 0; i < PN; i++) begin : gen_mem_read
+            always_ff @(posedge clk) begin
+                weight_mem_out_r[i] <= gen_memories[i].weight_ram[weight_rd_addr_r[i]];
+                threshold_mem_out_r[i] <= gen_memories[i].threshold_ram[group_idx_r];
+            end
+        end
+    endgenerate
+
+    // Pipeline to NP inputs
+    always_ff @(posedge clk) begin
+        for (int i = 0; i < PN; i++) begin
+            np_weight_in[i] <= np_active_r[i] ? weight_mem_out_r[i] : '0;
+            np_threshold_in[i] <= threshold_mem_out_r[i];
+        end
+        np_input_in <= input_buffer[input_rd_addr_r];
+    end
 
     assign np_valid_in = (state_r == BEAT);
     assign np_last     = (state_r == BEAT) && (beat_idx_r == LAST_BEAT_IDX);
 
-    always_comb begin
-        np_input_in = input_buffer[input_rd_addr_r];
-        for (int i = 0; i < PN; i++) begin
-            np_weight_in[i]    = np_active_r[i] ? weight_rams[i][weight_rd_addr_r[i]] : '0;
-            np_threshold_in[i] = threshold_cache_r[i];
-        end
-    end
-
+    // ---------------------------------------------------------------------------
+    // Address generation (unchanged)
+    // ---------------------------------------------------------------------------
     always_ff @(posedge clk) begin
         if (rst) begin
             for (int i = 0; i < PN; i++) begin
-                weight_rd_addr_r[i]  <= '0;
-                threshold_cache_r[i] <= '0;
+                weight_rd_addr_r[i] <= '0;
             end
             input_rd_addr_r <= '0;
         end else begin
@@ -151,8 +196,7 @@ module bnn_layer #(
                     if (start) begin
                         input_rd_addr_r <= '0;
                         for (int i = 0; i < PN; i++) begin
-                            weight_rd_addr_r[i]  <= WEIGHT_ADDR_WIDTH'(0);
-                            threshold_cache_r[i] <= threshold_rams[i][0];
+                            weight_rd_addr_r[i] <= WEIGHT_ADDR_WIDTH'(0);
                         end
                     end
                 end
@@ -162,14 +206,12 @@ module bnn_layer #(
                         input_rd_addr_r <= '0;
                         for (int i = 0; i < PN; i++) begin
                             weight_rd_addr_r[i] <= WEIGHT_ADDR_WIDTH'(next_group * INPUT_BEATS);
-                            if (next_group < NEURON_GROUPS)
-                                threshold_cache_r[i] <= threshold_rams[i][next_group];
                         end
                     end else begin
                         automatic int next_beat = int'(beat_idx_r) + 1;
                         input_rd_addr_r <= INPUT_ADDR_WIDTH'(next_beat);
                         for (int i = 0; i < PN; i++)
-                        weight_rd_addr_r[i] <= weight_rd_addr_r[i] + WEIGHT_ADDR_WIDTH'(1);
+                            weight_rd_addr_r[i] <= weight_rd_addr_r[i] + WEIGHT_ADDR_WIDTH'(1);
                     end
                 end
                 default: ;
@@ -185,21 +227,23 @@ module bnn_layer #(
             np_active_r <= '0;
         end else if (state_r == IDLE && start) begin
             np_active_r <= (NEURONS >= PN) ? {PN{1'b1}} : LAST_GROUP_MASK;
-        end else if (state_r == WAIT_OUT && drain_cnt_r == NP_PIPELINE_DEPTH[($clog2(
-                NP_PIPELINE_DEPTH+1
-            ))-1:0]) begin
-            if (group_idx_r == LAST_GROUP_IDX - GROUP_WIDTH'(1)) np_active_r <= LAST_GROUP_MASK;
-            else np_active_r <= {PN{1'b1}};
+        end else if (state_r == WAIT_OUT && drain_cnt_r == NP_PIPELINE_DEPTH[($clog2(NP_PIPELINE_DEPTH+1))-1:0]) begin
+            if (group_idx_r == LAST_GROUP_IDX - GROUP_WIDTH'(1)) 
+                np_active_r <= LAST_GROUP_MASK;
+            else 
+                np_active_r <= {PN{1'b1}};
         end
     end
 
     // ---------------------------------------------------------------------------
-    // Neuron processor instances
+    // Neuron processor instances (unchanged)
     // ---------------------------------------------------------------------------
     logic [         PN-1:0] np_valid_out;
     logic [         PN-1:0] np_activation;
     logic [COUNT_WIDTH-1:0] np_popcount   [PN];
+
     assign all_np_done = &(np_valid_out | ~np_active_r);
+
     generate
         for (genvar i = 0; i < PN; i++) begin : gen_nps
             neuron_processor #(
@@ -222,10 +266,11 @@ module bnn_layer #(
     endgenerate
 
     // ---------------------------------------------------------------------------
-    // Output collection
+    // Output collection (unchanged)
     // ---------------------------------------------------------------------------
     logic [    NEURONS-1:0] activations_buffer;
     logic [COUNT_WIDTH-1:0] popcounts_buffer   [NEURONS];
+
     always_ff @(posedge clk) begin
         if (rst) begin
             activations_buffer <= '0;
@@ -242,8 +287,10 @@ module bnn_layer #(
                         automatic int neuron_idx = int'(group_idx_r) * PN + i;
                         if (neuron_idx < NEURONS) begin
                             popcounts_buffer[neuron_idx] <= np_popcount[i];
-                            if (OUTPUT_LAYER) activations_buffer[neuron_idx] <= 1'b0;
-                            else activations_buffer[neuron_idx] <= np_activation[i];
+                            if (OUTPUT_LAYER) 
+                                activations_buffer[neuron_idx] <= 1'b0;
+                            else 
+                                activations_buffer[neuron_idx] <= np_activation[i];
                         end
                     end
                 end
@@ -253,7 +300,7 @@ module bnn_layer #(
     end
 
     // ---------------------------------------------------------------------------
-    // Main FSM
+    // Main FSM (unchanged)
     // ---------------------------------------------------------------------------
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -271,6 +318,7 @@ module bnn_layer #(
             end else if (state_r == IDLE && start) begin
                 output_valid_r <= 1'b0;
             end
+            
             case (state_r)
                 IDLE: begin
                     if (start) begin
@@ -308,15 +356,18 @@ module bnn_layer #(
     end
 
     // ---------------------------------------------------------------------------
-    // Output assignments
+    // Output assignments (unchanged)
     // ---------------------------------------------------------------------------
     assign busy            = (state_r != IDLE);
     assign done            = done_r;
     assign cfg_ready       = !busy;
     assign output_valid    = output_valid_r;
     assign activations_out = activations_buffer;
+
     always_comb begin
-        for (int i = 0; i < NEURONS; i++) popcounts_out[i*COUNT_WIDTH+:COUNT_WIDTH] = popcounts_buffer[i];
+        for (int i = 0; i < NEURONS; i++) 
+            popcounts_out[i*COUNT_WIDTH+:COUNT_WIDTH] = popcounts_buffer[i];
     end
+
 endmodule
 `default_nettype wire
