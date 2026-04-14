@@ -102,7 +102,7 @@ module bnn_layer #(
     localparam int GROUP_WIDTH = (NEURON_GROUPS > 1) ? $clog2(NEURON_GROUPS) : 1;
     localparam int PADDED_INPUTS = INPUT_BEATS * PW;
     localparam int LAST_GROUP_ACTIVE = (NEURONS % PN == 0) ? PN : (NEURONS % PN);
-    localparam logic [PN-1:0] LAST_GROUP_MASK = PN'((1 << LAST_GROUP_ACTIVE) - 1);
+    localparam logic [PN-1:0] LAST_GROUP_MASK = (LAST_GROUP_ACTIVE >= PN) ? {PN{1'b1}} : PN'((PN'(1) << LAST_GROUP_ACTIVE) - PN'(1));
     localparam logic [GROUP_WIDTH-1:0] LAST_GROUP_IDX = GROUP_WIDTH'(NEURON_GROUPS - 1);
     localparam logic [INPUT_ADDR_WIDTH-1:0] LAST_BEAT_IDX = INPUT_ADDR_WIDTH'(INPUT_BEATS - 1);
 
@@ -183,8 +183,8 @@ module bnn_layer #(
     // Generate write enable signals for each bank
     always_comb begin
         for (int i = 0; i < PN; i++) begin
-            weight_wr_en[i]    = cfg_write_en && !cfg_threshold_write && (cfg_np_idx == i) && !busy;
-            threshold_wr_en[i] = cfg_threshold_write && !cfg_write_en && (cfg_np_idx == i) && !busy;
+            weight_wr_en[i]    = cfg_write_en && (cfg_np_idx == i) && !busy;
+            threshold_wr_en[i] = cfg_threshold_write && (cfg_np_idx == i) && !busy;
         end
     end
 

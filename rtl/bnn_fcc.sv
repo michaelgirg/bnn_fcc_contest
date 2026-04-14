@@ -31,11 +31,8 @@ module bnn_fcc #(
     localparam int HIDDEN1 = TOPOLOGY[1];
     localparam int HIDDEN2 = TOPOLOGY[2];
     localparam int OUTPUTS = TOPOLOGY[3];
-    localparam int INPUTS_PER_BEAT = INPUT_BUS_WIDTH / INPUT_DATA_WIDTH;
-    localparam int BYTES_PER_INPUT = INPUT_DATA_WIDTH / 8;
     localparam int OUTPUT_KEEP_W = OUTPUT_BUS_WIDTH / 8;
     localparam int OUT_BYTES_USED = (OUTPUT_DATA_WIDTH + 7) / 8;
-    localparam int PIXEL_CNT_W = $clog2(INPUTS + 1);
     localparam int L1_COUNT_W = $clog2(INPUTS + 1);
     localparam int L2_COUNT_W = $clog2(HIDDEN1 + 1);
     localparam int L3_COUNT_W = $clog2(HIDDEN2 + 1);
@@ -57,13 +54,12 @@ module bnn_fcc #(
     localparam int GLOBAL_NEURON_W = $clog2(HIDDEN1 + HIDDEN2 + OUTPUTS);
 
     typedef enum logic [1:0] {
-        ST_COLLECT,
-        ST_START,
+        ST_IDLE,
         ST_RUN,
         ST_OUT
     } run_state_t;
-    run_state_t run_state_r;
 
+    run_state_t run_state_r;
     logic cfg_ready_i;
     logic cfg_write_en_i;
     logic [1:0] cfg_layer_sel_i;
@@ -74,12 +70,13 @@ module bnn_fcc #(
     logic cfg_threshold_write_i;
     logic core_cfg_ready_i;
     logic [GLOBAL_NEURON_W-1:0] cfg_global_neuron_idx_i;
-
     logic config_done_r;
     logic config_last_seen_r;
-    logic [INPUTS*INPUT_DATA_WIDTH-1:0] pixel_buffer_r;
-    logic [PIXEL_CNT_W-1:0] pixel_count_r;
+
+    // Binarization signals
     logic [INPUTS-1:0] bin_inputs_i;
+    logic binarized_valid_i;
+    logic binarized_ready_i;
 
     logic core_image_valid_r;
     logic core_image_ready_i;
@@ -87,7 +84,6 @@ module bnn_fcc #(
     logic core_busy_i;
     logic core_result_valid_i;
     logic [OUTPUTS*L3_COUNT_W-1:0] core_popcounts_i;
-
     logic argmax_valid_i;
     logic [CLASS_W-1:0] argmax_class_i;
     logic [L3_COUNT_W-1:0] argmax_score_i;
@@ -107,16 +103,6 @@ module bnn_fcc #(
             2'd2: cfg_global_neuron_idx_i = GLOBAL_NEURON_W'(HIDDEN1 + HIDDEN2 + cfg_neuron_idx_i);
             default: cfg_global_neuron_idx_i = '0;
         endcase
-    end
-
-    always_comb begin
-        data_in_ready = 1'b0;
-        if (config_done_r &&
-            (run_state_r == ST_COLLECT) &&
-            !data_out_valid_r &&
-            !core_busy_i &&
-            (pixel_count_r < INPUTS))
-            data_in_ready = 1'b1;
     end
 
     always_comb begin
@@ -162,13 +148,22 @@ module bnn_fcc #(
         .out_cfg_ready          (core_cfg_ready_i)
     );
 
+    // Streaming input binarization
     input_binarize #(
         .PIXELS   (INPUTS),
         .PIXEL_W  (INPUT_DATA_WIDTH),
+        .BUS_WIDTH(INPUT_BUS_WIDTH),
         .THRESHOLD(INPUT_DATA_WIDTH'(8'd128))
     ) u_input_binarize (
-        .pixels_in(pixel_buffer_r),
-        .bits_out (bin_inputs_i)
+        .clk            (clk),
+        .rst            (rst),
+        .data_in_data   (data_in_data),
+        .data_in_valid  (data_in_valid),
+        .data_in_ready  (data_in_ready),
+        .data_in_last   (data_in_last),
+        .binarized_out  (bin_inputs_i),
+        .binarized_valid(binarized_valid_i),
+        .binarized_ready(binarized_ready_i)
     );
 
     bnn_core #(
@@ -222,10 +217,7 @@ module bnn_fcc #(
             infer_started_r <= 1'b0;
         end else begin
             case (run_state_r)
-                ST_COLLECT: begin
-                    infer_started_r <= 1'b0;
-                end
-                ST_START: begin
+                ST_IDLE: begin
                     infer_started_r <= 1'b0;
                 end
                 ST_RUN: begin
@@ -241,39 +233,28 @@ module bnn_fcc #(
         end
     end
 
+    // Simplified 3-state FSM
     always_ff @(posedge clk) begin
         if (rst) begin
-            run_state_r        <= ST_COLLECT;
-            pixel_buffer_r     <= '0;
-            pixel_count_r      <= '0;
+            run_state_r        <= ST_IDLE;
             core_image_valid_r <= 1'b0;
+            binarized_ready_i  <= 1'b0;
             data_out_valid_r   <= 1'b0;
             data_out_data_r    <= '0;
         end else begin
             core_image_valid_r <= 1'b0;
+
             case (run_state_r)
-                ST_COLLECT: begin
-                    if (data_in_valid && data_in_ready) begin
-                        int next_count;
-                        next_count = pixel_count_r;
-                        for (int k = 0; k < INPUTS_PER_BEAT; k++) begin
-                            if (&data_in_keep[k*BYTES_PER_INPUT+:BYTES_PER_INPUT]) begin
-                                if (next_count < INPUTS) begin
-                                    pixel_buffer_r[next_count*INPUT_DATA_WIDTH +: INPUT_DATA_WIDTH]
-                                        <= data_in_data[k*INPUT_DATA_WIDTH +: INPUT_DATA_WIDTH];
-                                    next_count = next_count + 1;
-                                end
-                            end
-                        end
-                        pixel_count_r <= PIXEL_CNT_W'(next_count);
-                        if (next_count >= INPUTS) run_state_r <= ST_START;
+                ST_IDLE: begin
+                    if (config_done_r && binarized_valid_i && !core_busy_i) begin
+                        binarized_ready_i  <= 1'b1;
+                        core_image_valid_r <= 1'b1;
+                        run_state_r        <= ST_RUN;
                     end
                 end
-                ST_START: begin
-                    core_image_valid_r <= 1'b1;
-                    run_state_r        <= ST_RUN;
-                end
+
                 ST_RUN: begin
+                    binarized_ready_i <= 1'b0;
                     if (infer_started_r && core_done_i && argmax_valid_i) begin
                         data_out_valid_r <= 1'b1;
                         data_out_data_r <= '0;
@@ -281,16 +262,17 @@ module bnn_fcc #(
                         run_state_r <= ST_OUT;
                     end
                 end
+
                 ST_OUT: begin
                     if (data_out_valid_r && data_out_ready) begin
                         data_out_valid_r <= 1'b0;
                         data_out_data_r  <= '0;
-                        pixel_count_r    <= '0;
-                        run_state_r      <= ST_COLLECT;
+                        run_state_r      <= ST_IDLE;
                     end
                 end
+
                 default: begin
-                    run_state_r <= ST_COLLECT;
+                    run_state_r <= ST_IDLE;
                 end
             endcase
         end
