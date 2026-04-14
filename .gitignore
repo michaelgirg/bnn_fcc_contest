@@ -1,6 +1,7 @@
 work/
 transcript
 *.mpf
-__pycache__
 *.mti
+__pycache__/
 .sync-conflict-20260409-131929-YJ3DWXS.gitignore
+openflex/build_vivado/outputs/*.dcp
