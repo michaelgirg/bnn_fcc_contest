@@ -27,9 +27,6 @@ module bnn_fcc #(
     output logic [OUTPUT_BUS_WIDTH/8-1:0] data_out_keep,
     output logic                          data_out_last
 );
-    // ========================================================================
-    // Local Parameters
-    // ========================================================================
     localparam int INPUTS = TOPOLOGY[0];
     localparam int HIDDEN1 = TOPOLOGY[1];
     localparam int HIDDEN2 = TOPOLOGY[2];
@@ -55,88 +52,37 @@ module bnn_fcc #(
     localparam int CFG_WEIGHT_ADDR_W = (MAX_WEIGHT_BEATS > 1) ? $clog2(MAX_WEIGHT_BEATS) : 1;
     localparam int CLASS_W = (OUTPUTS > 1) ? $clog2(OUTPUTS) : 1;
     localparam int GLOBAL_NEURON_W = $clog2(HIDDEN1 + HIDDEN2 + OUTPUTS);
-
-    // ========================================================================
-    // Type Definitions
-    // ========================================================================
     typedef enum logic [1:0] {
+        ST_WAIT_CONFIG,
         ST_IDLE,
         ST_RUN,
         ST_OUT
     } run_state_t;
-
-    // ========================================================================
-    // Signal Declarations
-    // ========================================================================
-    run_state_t run_state_r;
-
-    // Configuration signals
-    logic cfg_ready_i;
-    logic cfg_write_en_i;
-    logic [1:0] cfg_layer_sel_i;
-    logic [CFG_NEURON_W-1:0] cfg_neuron_idx_i;
-    logic [CFG_WEIGHT_ADDR_W-1:0] cfg_weight_addr_i;
-    logic [PARALLEL_INPUTS-1:0] cfg_weight_data_i;
-    logic [THRESHOLD_W-1:0] cfg_threshold_data_i;
-    logic cfg_threshold_write_i;
-    logic core_cfg_ready_i;
-    logic [GLOBAL_NEURON_W-1:0] cfg_global_neuron_idx_i;
-    logic config_done_r;
-
-    // Binarization signals
-    logic [INPUTS-1:0] bin_inputs_i;
-    logic binarized_valid_i;
-    logic binarized_ready_i;
-
-    // Core signals
-    logic core_image_valid_r;
-    logic core_image_ready_i;
-    logic core_done_i;
-    logic core_result_valid_i;
-    logic [OUTPUTS*L3_COUNT_W-1:0] core_popcounts_i;
-
-    // Argmax signals (combinational - NO registration to avoid 1-cycle delay)
-    logic argmax_valid_i;
-    logic [CLASS_W-1:0] argmax_class_i;
-    logic [L3_COUNT_W-1:0] argmax_score_i;
-
-    // Control signals
-    logic infer_started_r;
-    logic data_out_valid_r;
-    logic [OUTPUT_BUS_WIDTH-1:0] data_out_data_r;
-
-    // ========================================================================
-    // Pipelined Reset Distribution (Optimization #1)
-    // ========================================================================
-    logic rst_r;
-
-    always_ff @(posedge clk or posedge rst) begin
-        if (rst) rst_r <= 1'b1;
-        else rst_r <= 1'b0;
-    end
-
-    // ========================================================================
-    // Register High-Fanout Control Signals (Optimization #2)
-    // ========================================================================
-    logic core_busy_r;
-    logic core_cfg_ready_r;
-
-    always_ff @(posedge clk) begin
-        if (rst_r) begin
-            core_busy_r      <= 1'b0;
-            core_cfg_ready_r <= 1'b1;
-        end else begin
-            core_busy_r      <= !core_image_ready_i;
-            core_cfg_ready_r <= core_image_ready_i;
-        end
-    end
-
+    run_state_t                          run_state_r;
+    logic                                cfg_ready_i;
+    logic                                cfg_write_en_i;
+    logic       [                   1:0] cfg_layer_sel_i;
+    logic       [      CFG_NEURON_W-1:0] cfg_neuron_idx_i;
+    logic       [ CFG_WEIGHT_ADDR_W-1:0] cfg_weight_addr_i;
+    logic       [   PARALLEL_INPUTS-1:0] cfg_weight_data_i;
+    logic       [       THRESHOLD_W-1:0] cfg_threshold_data_i;
+    logic                                cfg_threshold_write_i;
+    logic       [   GLOBAL_NEURON_W-1:0] cfg_global_neuron_idx_i;
+    logic                                config_done_r;
+    logic       [            INPUTS-1:0] bin_inputs_i;
+    logic                                binarized_valid_i;
+    logic                                binarized_ready_i;
+    logic       [            INPUTS-1:0] image_buffer_r;
+    logic                                core_image_valid_r;
+    logic                                core_image_ready_i;
+    logic                                core_result_valid_i;
+    logic       [OUTPUTS*L3_COUNT_W-1:0] core_popcounts_i;
+    logic                                data_out_valid_r;
+    logic       [  OUTPUT_BUS_WIDTH-1:0] data_out_data_r;
+    logic       [        L3_COUNT_W-1:0] popcount_array          [OUTPUTS];
+    logic       [        L3_COUNT_W-1:0] argmax_value_c;
+    logic       [           CLASS_W-1:0] argmax_class_c;
     assign config_ready = cfg_ready_i;
-    assign core_cfg_ready_i = core_cfg_ready_r;
-
-    // ========================================================================
-    // Configuration Address Conversion
-    // ========================================================================
     always_comb begin
         case (cfg_layer_sel_i)
             2'd0: cfg_global_neuron_idx_i = GLOBAL_NEURON_W'(cfg_neuron_idx_i);
@@ -145,25 +91,19 @@ module bnn_fcc #(
             default: cfg_global_neuron_idx_i = '0;
         endcase
     end
-
-    // ========================================================================
-    // Output Assignment
-    // ========================================================================
     always_comb begin
         data_out_valid = data_out_valid_r;
         data_out_data  = data_out_data_r;
         data_out_keep  = '0;
         for (int i = 0; i < OUT_BYTES_USED; i++) begin
-            if (i < OUTPUT_KEEP_W) data_out_keep[i] = data_out_valid_r;
+            if (i < OUTPUT_KEEP_W) begin
+                data_out_keep[i] = data_out_valid_r;
+            end
         end
         data_out_last = data_out_valid_r;
     end
-
-    // ========================================================================
-    // Simplified Configuration Done Logic
-    // ========================================================================
     always_ff @(posedge clk) begin
-        if (rst_r) begin
+        if (rst) begin
             config_done_r <= 1'b0;
         end else begin
             if (config_valid && cfg_ready_i && config_last) begin
@@ -171,66 +111,54 @@ module bnn_fcc #(
             end
         end
     end
-
-    // ========================================================================
-    // Inference Tracking
-    // ========================================================================
-    always_ff @(posedge clk) begin
-        if (rst_r) begin
-            infer_started_r <= 1'b0;
-        end else begin
-            case (run_state_r)
-                ST_IDLE: begin
-                    infer_started_r <= 1'b0;
-                end
-                ST_RUN: begin
-                    if (core_busy_r) infer_started_r <= 1'b1;
-                end
-                ST_OUT: begin
-                    if (data_out_valid_r && data_out_ready) infer_started_r <= 1'b0;
-                end
-                default: begin
-                    infer_started_r <= 1'b0;
-                end
-            endcase
+    always_comb begin
+        binarized_ready_i = (run_state_r == ST_IDLE) && config_done_r && core_image_ready_i;
+    end
+    always_comb begin
+        for (int i = 0; i < OUTPUTS; i++) begin
+            popcount_array[i] = core_popcounts_i[i*L3_COUNT_W+:L3_COUNT_W];
+        end
+        argmax_value_c = popcount_array[0];
+        argmax_class_c = '0;
+        for (int i = 1; i < OUTPUTS; i++) begin
+            if (popcount_array[i] > argmax_value_c) begin
+                argmax_value_c = popcount_array[i];
+                argmax_class_c = CLASS_W'(i);
+            end
         end
     end
-
-    // ========================================================================
-    // Main FSM (CRITICAL FIX: Use combinational argmax signals directly)
-    // ========================================================================
     always_ff @(posedge clk) begin
-        if (rst_r) begin
-            run_state_r        <= ST_IDLE;
+        if (rst) begin
+            run_state_r        <= ST_WAIT_CONFIG;
             core_image_valid_r <= 1'b0;
-            binarized_ready_i  <= 1'b0;
             data_out_valid_r   <= 1'b0;
             data_out_data_r    <= '0;
+            image_buffer_r     <= '0;
         end else begin
             core_image_valid_r <= 1'b0;
-
             case (run_state_r)
+                ST_WAIT_CONFIG: begin
+                    data_out_valid_r <= 1'b0;
+                    data_out_data_r  <= '0;
+                    if (config_done_r) begin
+                        run_state_r <= ST_IDLE;
+                    end
+                end
                 ST_IDLE: begin
-                    if (config_done_r && binarized_valid_i && !core_busy_r) begin
-                        binarized_ready_i  <= 1'b1;
+                    if (binarized_valid_i && binarized_ready_i) begin
+                        image_buffer_r     <= bin_inputs_i;
                         core_image_valid_r <= 1'b1;
                         run_state_r        <= ST_RUN;
                     end
                 end
-
                 ST_RUN: begin
-                    binarized_ready_i <= 1'b0;
-
-                    // FIX: Use COMBINATIONAL argmax signals directly
-                    // This prevents the 1-cycle delay that shifted outputs by 1 image
-                    if (infer_started_r && core_done_i && argmax_valid_i) begin
+                    // FIXED: Use core_result_valid_i directly, not delayed
+                    if (core_result_valid_i) begin
                         data_out_valid_r <= 1'b1;
-                        data_out_data_r <= '0;
-                        data_out_data_r[CLASS_W-1:0] <= argmax_class_i;  // Combinational!
-                        run_state_r <= ST_OUT;
+                        data_out_data_r  <= OUTPUT_BUS_WIDTH'(argmax_class_c);
+                        run_state_r      <= ST_OUT;
                     end
                 end
-
                 ST_OUT: begin
                     if (data_out_valid_r && data_out_ready) begin
                         data_out_valid_r <= 1'b0;
@@ -238,17 +166,15 @@ module bnn_fcc #(
                         run_state_r      <= ST_IDLE;
                     end
                 end
-
-                default: run_state_r <= ST_IDLE;
+                default: begin
+                    run_state_r        <= ST_WAIT_CONFIG;
+                    core_image_valid_r <= 1'b0;
+                    data_out_valid_r   <= 1'b0;
+                    data_out_data_r    <= '0;
+                end
             endcase
         end
     end
-
-    // ========================================================================
-    // Module Instantiations
-    // ========================================================================
-
-    // Configuration Manager
     config_manager_multi #(
         .CONFIG_BUS_WIDTH(CONFIG_BUS_WIDTH),
         .PW              (PARALLEL_INPUTS),
@@ -279,10 +205,8 @@ module bnn_fcc #(
         .out_cfg_weight_data    (cfg_weight_data_i),
         .out_cfg_threshold_data (cfg_threshold_data_i),
         .out_cfg_threshold_write(cfg_threshold_write_i),
-        .out_cfg_ready          (core_cfg_ready_i)
+        .out_cfg_ready          (1'b1)
     );
-
-    // Input Binarization
     input_binarize #(
         .PIXELS   (INPUTS),
         .PIXEL_W  (INPUT_DATA_WIDTH),
@@ -299,8 +223,6 @@ module bnn_fcc #(
         .binarized_valid(binarized_valid_i),
         .binarized_ready(binarized_ready_i)
     );
-
-    // BNN Core
     bnn_core #(
         .INPUTS (INPUTS),
         .HIDDEN1(HIDDEN1),
@@ -311,13 +233,13 @@ module bnn_fcc #(
     ) u_bnn_core (
         .clk                  (clk),
         .rst                  (rst),
-        .image_input          (bin_inputs_i),
+        .image_input          (image_buffer_r),
         .image_valid          (core_image_valid_r),
         .image_ready          (core_image_ready_i),
         .result_activations   (  /* unused */),
         .result_popcounts     (core_popcounts_i),
         .result_valid         (core_result_valid_i),
-        .done                 (core_done_i),
+        .done                 (  /* unused */),
         .cfg_write_en         (cfg_write_en_i),
         .cfg_global_neuron_idx(cfg_global_neuron_idx_i),
         .cfg_weight_addr      (cfg_weight_addr_i),
@@ -325,17 +247,4 @@ module bnn_fcc #(
         .cfg_threshold_data   (cfg_threshold_data_i),
         .cfg_threshold_write  (cfg_threshold_write_i)
     );
-
-    // Argmax (Combinational Tree - outputs used directly, NO pipeline register)
-    argmax #(
-        .OUTPUTS(OUTPUTS),
-        .COUNT_W(L3_COUNT_W)
-    ) u_argmax (
-        .valid_in    (core_result_valid_i),
-        .popcounts_in(core_popcounts_i),
-        .valid_out   (argmax_valid_i),       // Used directly in FSM
-        .class_idx   (argmax_class_i),       // Used directly in FSM
-        .max_value   (argmax_score_i)
-    );
-
 endmodule

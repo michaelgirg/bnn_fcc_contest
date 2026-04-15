@@ -105,44 +105,53 @@ module bnn_core #(
         end
     end
 
-    // =========================================================================
-    // Main FSM
-    // =========================================================================
     always_ff @(posedge clk) begin
         if (rst) begin
             state_r        <= IDLE;
             done_r         <= 1'b0;
             result_valid_r <= 1'b0;
         end else begin
-            done_r <= 1'b0;
+            done_r         <= 1'b0;
+            result_valid_r <= 1'b0;
 
             case (state_r)
                 IDLE: begin
                     if (image_valid) begin
-                        result_valid_r <= 1'b0;
-                        state_r        <= RUN_L1;
+                        state_r <= RUN_L1;
                     end
                 end
+
                 RUN_L1: begin
-                    if (l1_done) state_r <= LOAD_L2;
+                    if (l1_output_valid) begin
+                        state_r <= LOAD_L2;
+                    end
                 end
+
                 LOAD_L2: begin
                     state_r <= RUN_L2;
                 end
+
                 RUN_L2: begin
-                    if (l2_done) state_r <= LOAD_L3;
+                    if (l2_output_valid) begin
+                        state_r <= LOAD_L3;
+                    end
                 end
+
                 LOAD_L3: begin
                     state_r <= RUN_L3;
                 end
+
                 RUN_L3: begin
-                    if (l3_done) begin
+                    if (l3_output_valid) begin
                         result_valid_r <= 1'b1;
                         done_r         <= 1'b1;
                         state_r        <= IDLE;
                     end
                 end
-                default: state_r <= IDLE;
+
+                default: begin
+                    state_r <= IDLE;
+                end
             endcase
         end
     end

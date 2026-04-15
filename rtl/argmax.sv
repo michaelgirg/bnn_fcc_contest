@@ -1,12 +1,14 @@
 //==============================================================================
-// Argmax Module - Tree-based comparator for output layer
-// Finds the neuron with maximum popcount value
+// Argmax Module - Pipelined tree-based comparator for output layer
+// FIXED: Stage 1 compares incoming data, not stale registered data
 //==============================================================================
 module argmax #(
     parameter  int OUTPUTS = 10,
     parameter  int COUNT_W = 9,
     localparam int CLASS_W = (OUTPUTS > 1) ? $clog2(OUTPUTS) : 1
 ) (
+    input  logic                       clk,
+    input  logic                       rst,
     input  logic                       valid_in,
     input  logic [OUTPUTS*COUNT_W-1:0] popcounts_in,
     output logic                       valid_out,
@@ -15,10 +17,9 @@ module argmax #(
 );
 
     //==========================================================================
-    // Stage 0: Unpack input popcounts
+    // Unpack inputs for easier access
     //==========================================================================
     logic [COUNT_W-1:0] count[OUTPUTS];
-
     always_comb begin
         for (int i = 0; i < OUTPUTS; i++) begin
             count[i] = popcounts_in[i*COUNT_W+:COUNT_W];
@@ -26,83 +27,104 @@ module argmax #(
     end
 
     //==========================================================================
-    // Stage 1: Pairwise comparison (5 comparisons in parallel)
-    // Compares: (0,1), (2,3), (4,5), (6,7), (8,9)
+    // Pipeline Stage 1: Pairwise comparisons + register results
     //==========================================================================
-    logic [COUNT_W-1:0] stage1_max[5];
-    logic [CLASS_W-1:0] stage1_idx[5];
+    typedef struct packed {
+        logic [COUNT_W-1:0] value;
+        logic [CLASS_W-1:0] index;
+    } winner_t;
 
-    always_comb begin
-        for (int i = 0; i < 5; i++) begin
-            if (count[2*i] >= count[2*i+1]) begin
-                stage1_max[i] = count[2*i];
-                stage1_idx[i] = CLASS_W'(2 * i);
-            end else begin
-                stage1_max[i] = count[2*i+1];
-                stage1_idx[i] = CLASS_W'(2 * i + 1);
+    winner_t stage1_winners_r[5];
+    logic    valid_s1_r;
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            valid_s1_r <= 1'b0;
+        end else begin
+            // FIXED: Compare INCOMING data, register the results
+            for (int i = 0; i < 5; i++) begin
+                if (count[2*i] >= count[2*i+1]) begin
+                    stage1_winners_r[i].value <= count[2*i];
+                    stage1_winners_r[i].index <= CLASS_W'(2 * i);
+                end else begin
+                    stage1_winners_r[i].value <= count[2*i+1];
+                    stage1_winners_r[i].index <= CLASS_W'(2 * i + 1);
+                end
             end
+            valid_s1_r <= valid_in;
         end
     end
 
     //==========================================================================
-    // Stage 2: Reduce 5 winners to 3
-    // Compares: (stage1[0], stage1[1]), (stage1[2], stage1[3])
-    // Passes through: stage1[4]
+    // Pipeline Stage 2: Reduce 5 winners to 3
     //==========================================================================
-    logic [COUNT_W-1:0] stage2_max[3];
-    logic [CLASS_W-1:0] stage2_idx[3];
+    winner_t stage2_winners_r[3];
+    logic    valid_s2_r;
 
-    always_comb begin
-        // Compare first two stage1 winners
-        if (stage1_max[0] >= stage1_max[1]) begin
-            stage2_max[0] = stage1_max[0];
-            stage2_idx[0] = stage1_idx[0];
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            valid_s2_r <= 1'b0;
         end else begin
-            stage2_max[0] = stage1_max[1];
-            stage2_idx[0] = stage1_idx[1];
-        end
+            // Compare winners [0] vs [1]
+            if (stage1_winners_r[0].value >= stage1_winners_r[1].value) begin
+                stage2_winners_r[0] <= stage1_winners_r[0];
+            end else begin
+                stage2_winners_r[0] <= stage1_winners_r[1];
+            end
 
-        // Compare next two stage1 winners
-        if (stage1_max[2] >= stage1_max[3]) begin
-            stage2_max[1] = stage1_max[2];
-            stage2_idx[1] = stage1_idx[2];
-        end else begin
-            stage2_max[1] = stage1_max[3];
-            stage2_idx[1] = stage1_idx[3];
-        end
+            // Compare winners [2] vs [3]
+            if (stage1_winners_r[2].value >= stage1_winners_r[3].value) begin
+                stage2_winners_r[1] <= stage1_winners_r[2];
+            end else begin
+                stage2_winners_r[1] <= stage1_winners_r[3];
+            end
 
-        // Pass through the odd one
-        stage2_max[2] = stage1_max[4];
-        stage2_idx[2] = stage1_idx[4];
+            // Pass through winner [4]
+            stage2_winners_r[2] <= stage1_winners_r[4];
+
+            valid_s2_r <= valid_s1_r;
+        end
     end
 
     //==========================================================================
-    // Stage 3: Final reduction (find maximum of 3 values)
+    // Pipeline Stage 3: Final comparison (3 inputs -> 1 winner)
     //==========================================================================
-    logic [COUNT_W-1:0] stage3_max_temp;
-    logic [CLASS_W-1:0] stage3_idx_temp;
+    logic [COUNT_W-1:0] max_value_r;
+    logic [CLASS_W-1:0] class_idx_r;
+    logic               valid_s3_r;
 
-    always_comb begin
-        // First compare stage2[0] vs stage2[1]
-        if (stage2_max[0] >= stage2_max[1]) begin
-            stage3_max_temp = stage2_max[0];
-            stage3_idx_temp = stage2_idx[0];
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            max_value_r <= '0;
+            class_idx_r <= '0;
+            valid_s3_r  <= 1'b0;
         end else begin
-            stage3_max_temp = stage2_max[1];
-            stage3_idx_temp = stage2_idx[1];
-        end
+            // Compare stage2[0] vs stage2[1]
+            winner_t temp_winner;
+            if (stage2_winners_r[0].value >= stage2_winners_r[1].value) begin
+                temp_winner = stage2_winners_r[0];
+            end else begin
+                temp_winner = stage2_winners_r[1];
+            end
 
-        // Then compare winner against stage2[2]
-        if (stage3_max_temp >= stage2_max[2]) begin
-            max_value = stage3_max_temp;
-            class_idx = stage3_idx_temp;
-        end else begin
-            max_value = stage2_max[2];
-            class_idx = stage2_idx[2];
-        end
+            // Compare temp_winner vs stage2[2]
+            if (temp_winner.value >= stage2_winners_r[2].value) begin
+                max_value_r <= temp_winner.value;
+                class_idx_r <= temp_winner.index;
+            end else begin
+                max_value_r <= stage2_winners_r[2].value;
+                class_idx_r <= stage2_winners_r[2].index;
+            end
 
-        // Valid passthrough
-        valid_out = valid_in;
+            valid_s3_r <= valid_s2_r;
+        end
     end
+
+    //==========================================================================
+    // Output assignments
+    //==========================================================================
+    assign max_value = max_value_r;
+    assign class_idx = class_idx_r;
+    assign valid_out = valid_s3_r;
 
 endmodule
