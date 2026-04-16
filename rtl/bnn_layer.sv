@@ -306,18 +306,29 @@ module bnn_layer #(
         end
     end
 
-    // Weight and threshold address control
     generate
         for (genvar i = 0; i < PN; i++) begin : gen_addr_ctrl
+
+            logic [WEIGHT_ADDR_WIDTH-1:0] next_group_base_r;
+
             always_ff @(posedge clk) begin
                 if (rst) begin
-                    weight_rd_addr[i]    <= '0;
+                    next_group_base_r <= '0;
+                    weight_rd_addr[i] <= '0;
                     threshold_rd_addr[i] <= '0;
                 end else begin
-                    if (start_group) begin
-                        weight_rd_addr[i]    <= WEIGHT_ADDR_WIDTH'(int'(grp_sel_next) * INPUT_BEATS);
-                        threshold_rd_addr[i] <= grp_sel_next;
-                    end else if (issue_beat) begin
+                    // Initial launch: group 0
+                    if ((state_r == IDLE) && start) begin
+                        next_group_base_r    <= WEIGHT_ADDR_WIDTH'(INPUT_BEATS);  // prep for group 1
+                        weight_rd_addr[i]    <= '0;  // launch group 0
+                        threshold_rd_addr[i] <= '0;
+                    end  // Launch next group after completion
+                    else if ((state_r == WAIT_OUT) && all_np_done && !all_groups_done) begin
+                        weight_rd_addr[i]    <= next_group_base_r;  // use precomputed base
+                        threshold_rd_addr[i] <= grp_sel_next;  // matches launched group
+                        next_group_base_r    <= next_group_base_r + WEIGHT_ADDR_WIDTH'(INPUT_BEATS);
+                    end  // Sequential increment during beats
+                    else if (issue_beat) begin
                         weight_rd_addr[i] <= weight_rd_addr[i] + WEIGHT_ADDR_WIDTH'(1);
                     end
                 end

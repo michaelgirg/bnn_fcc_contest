@@ -1,5 +1,19 @@
-+==============+===============+====================================================+
-| Launch Clock | Capture Clock | Pin                                                |
-+==============+===============+====================================================+
-| clk          | clk           | DUT/u_input_binarize/binarized_buffer_r_reg[709]/D |
-+--------------+---------------+----------------------------------------------------+
++==============+===============+=====================================================+
+| Launch Clock | Capture Clock | Pin                                                 |
++==============+===============+=====================================================+
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[237]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[229]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[221]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[195]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[19]/D  |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[197]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[21]/D  |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[228]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[238]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[207]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[254]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[215]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[232]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[239]/D |
+| clk          | clk           | DUT/u_bnn_core/layer1/activations_buffer_reg[198]/D |
++--------------+---------------+-----------------------------------------------------+

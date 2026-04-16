@@ -2,8 +2,8 @@
 # Vivado v2021.2 (64-bit)
 # SW Build 3367213 on Tue Oct 19 02:47:39 MDT 2021
 # IP Build 3369179 on Thu Oct 21 08:25:16 MDT 2021
-# Start of session at: Thu Apr 16 09:43:23 2026
-# Process ID: 1369592
+# Start of session at: Thu Apr 16 10:41:08 2026
+# Process ID: 1535567
 # Current directory: /ecel/UFAD/mgirgis1/Documents/RC2/bnn/bnn_fcc_contest/openflex/build_vivado
 # Command line: vivado -mode batch -source /home/UFAD/mgirgis1/envs/openflex/lib64/python3.6/site-packages/openflex/tcl/vivado_flow.tcl -tclargs bnn_fcc_timing XCU250-FIGD2104-2L-E 1.0
 # Log file: /ecel/UFAD/mgirgis1/Documents/RC2/bnn/bnn_fcc_contest/openflex/build_vivado/vivado.log
