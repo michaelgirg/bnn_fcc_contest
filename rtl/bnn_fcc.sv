@@ -79,9 +79,12 @@ module bnn_fcc #(
     logic       [OUTPUTS*L3_COUNT_W-1:0] core_popcounts_i;
     logic                                data_out_valid_r;
     logic       [  OUTPUT_BUS_WIDTH-1:0] data_out_data_r;
-    logic       [        L3_COUNT_W-1:0] popcount_array          [OUTPUTS];
-    logic       [        L3_COUNT_W-1:0] argmax_value_c;
-    logic       [           CLASS_W-1:0] argmax_class_c;
+
+    // NEW: Argmax interface signals
+    logic                                argmax_valid_out_i;
+    logic       [           CLASS_W-1:0] argmax_class_i;
+    logic       [        L3_COUNT_W-1:0] argmax_value_i;
+
     assign config_ready = cfg_ready_i;
     always_comb begin
         case (cfg_layer_sel_i)
@@ -114,19 +117,7 @@ module bnn_fcc #(
     always_comb begin
         binarized_ready_i = (run_state_r == ST_IDLE) && config_done_r && core_image_ready_i;
     end
-    always_comb begin
-        for (int i = 0; i < OUTPUTS; i++) begin
-            popcount_array[i] = core_popcounts_i[i*L3_COUNT_W+:L3_COUNT_W];
-        end
-        argmax_value_c = popcount_array[0];
-        argmax_class_c = '0;
-        for (int i = 1; i < OUTPUTS; i++) begin
-            if (popcount_array[i] > argmax_value_c) begin
-                argmax_value_c = popcount_array[i];
-                argmax_class_c = CLASS_W'(i);
-            end
-        end
-    end
+
     always_ff @(posedge clk) begin
         if (rst) begin
             run_state_r        <= ST_WAIT_CONFIG;
@@ -152,10 +143,11 @@ module bnn_fcc #(
                     end
                 end
                 ST_RUN: begin
-                    // FIXED: Use core_result_valid_i directly, not delayed
-                    if (core_result_valid_i) begin
+                    // FIXED: Wait for pipelined argmax result
+                    if (argmax_valid_out_i) begin
                         data_out_valid_r <= 1'b1;
-                        data_out_data_r  <= OUTPUT_BUS_WIDTH'(argmax_class_c);
+                        // Use explicit zero-extension
+                        data_out_data_r  <= {{(OUTPUT_BUS_WIDTH - CLASS_W) {1'b0}}, argmax_class_i};
                         run_state_r      <= ST_OUT;
                     end
                 end
@@ -246,5 +238,18 @@ module bnn_fcc #(
         .cfg_weight_data      (cfg_weight_data_i),
         .cfg_threshold_data   (cfg_threshold_data_i),
         .cfg_threshold_write  (cfg_threshold_write_i)
+    );
+
+    argmax #(
+        .OUTPUTS(OUTPUTS),
+        .COUNT_W(L3_COUNT_W)
+    ) u_argmax (
+        .clk         (clk),
+        .rst         (rst),
+        .valid_in    (core_result_valid_i),
+        .popcounts_in(core_popcounts_i),
+        .valid_out   (argmax_valid_out_i),
+        .class_idx   (argmax_class_i),
+        .max_value   (argmax_value_i)
     );
 endmodule
