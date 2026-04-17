@@ -1,3 +1,65 @@
+//==============================================================================
+// Weight Bank Module - Separate BRAM instance per processor
+//==============================================================================
+module weight_bank #(
+    parameter int PW    = 8,
+    parameter int DEPTH = 3136
+) (
+    input  wire logic                     clk,
+    input  wire logic                     write_en,
+    input  wire logic [$clog2(DEPTH)-1:0] write_addr,
+    input  wire logic [           PW-1:0] write_data,
+    input  wire logic [$clog2(DEPTH)-1:0] read_addr,
+    output logic      [           PW-1:0] read_data
+);
+    localparam int ADDR_WIDTH = $clog2(DEPTH);
+
+    (* ram_style = "block" *) logic [PW-1:0] mem[0:DEPTH-1];
+
+    // Write port
+    always_ff @(posedge clk) begin
+        if (write_en) begin
+            mem[write_addr] <= write_data;
+        end
+    end
+
+    // Read port with output register for BRAM inference
+    always_ff @(posedge clk) begin
+        read_data <= mem[read_addr];
+    end
+endmodule
+
+//==============================================================================
+// Threshold Bank Module - Separate distributed RAM per processor
+//==============================================================================
+module threshold_bank #(
+    parameter int COUNT_WIDTH = 10,
+    parameter int DEPTH       = 32
+) (
+    input  wire logic                     clk,
+    input  wire logic                     write_en,
+    input  wire logic [$clog2(DEPTH)-1:0] write_addr,
+    input  wire logic [  COUNT_WIDTH-1:0] write_data,
+    input  wire logic [$clog2(DEPTH)-1:0] read_addr,
+    output logic      [  COUNT_WIDTH-1:0] read_data
+);
+    localparam int ADDR_WIDTH = $clog2(DEPTH);
+
+    (* ram_style = "distributed" *) logic [COUNT_WIDTH-1:0] mem[0:DEPTH-1];
+
+    // Write port
+    always_ff @(posedge clk) begin
+        if (write_en) begin
+            mem[write_addr] <= write_data;
+        end
+    end
+
+    // Read port with output register
+    always_ff @(posedge clk) begin
+        read_data <= mem[read_addr];
+    end
+endmodule
+
 module bnn_layer #(
     parameter int INPUTS                = 784,
     parameter int NEURONS               = 256,
