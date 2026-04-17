@@ -93,14 +93,14 @@ module bnn_layer #(
     //==========================================================================
     // Local Parameters
     //==========================================================================
-    localparam int NEURON_GROUPS = (NEURONS + PN - 1) / PN;
-    localparam int INPUT_ADDR_WIDTH = (INPUT_BEATS > 1) ? $clog2(INPUT_BEATS) : 1;
-    localparam int WEIGHT_DEPTH = INPUT_BEATS * NEURON_GROUPS;
-    localparam int WEIGHT_ADDR_WIDTH = (WEIGHT_DEPTH > 1) ? $clog2(WEIGHT_DEPTH) : 1;
-    localparam int GROUP_WIDTH = (NEURON_GROUPS > 1) ? $clog2(NEURON_GROUPS) : 1;
-    localparam int PADDED_INPUTS = INPUT_BEATS * PW;
-    localparam int LAST_GROUP_ACTIVE = (NEURONS % PN == 0) ? PN : (NEURONS % PN);
-    localparam int NP_IDX_WIDTH = (PN > 1) ? $clog2(PN) : 1;
+    localparam int NEURON_GROUPS      = (NEURONS + PN - 1) / PN;
+    localparam int INPUT_ADDR_WIDTH   = (INPUT_BEATS > 1) ? $clog2(INPUT_BEATS) : 1;
+    localparam int WEIGHT_DEPTH       = INPUT_BEATS * NEURON_GROUPS;
+    localparam int WEIGHT_ADDR_WIDTH  = (WEIGHT_DEPTH > 1) ? $clog2(WEIGHT_DEPTH) : 1;
+    localparam int GROUP_WIDTH        = (NEURON_GROUPS > 1) ? $clog2(NEURON_GROUPS) : 1;
+    localparam int PADDED_INPUTS      = INPUT_BEATS * PW;
+    localparam int LAST_GROUP_ACTIVE  = (NEURONS % PN == 0) ? PN : (NEURONS % PN);
+    localparam int NP_IDX_WIDTH       = (PN > 1) ? $clog2(PN) : 1;
 
     localparam logic [PN-1:0] LAST_GROUP_MASK =
         (LAST_GROUP_ACTIVE >= PN) ? {PN{1'b1}} :
@@ -163,33 +163,33 @@ module bnn_layer #(
     // Stage 0: capture incoming config transaction
     // Stage 1: decode processor/group/local address
     //==========================================================================
-    logic                          cfg_we_s0;
-    logic                          cfg_tw_s0;
-    logic [CFG_NEURON_WIDTH-1:0]   cfg_neuron_idx_s0;
+    logic                             cfg_we_s0;
+    logic                             cfg_tw_s0;
+    logic [CFG_NEURON_WIDTH-1:0]      cfg_neuron_idx_s0;
     logic [CFG_WEIGHT_ADDR_WIDTH-1:0] cfg_weight_addr_s0;
-    logic [PW-1:0]                 cfg_weight_data_s0;
-    logic [COUNT_WIDTH-1:0]        cfg_threshold_data_s0;
+    logic [PW-1:0]                    cfg_weight_data_s0;
+    logic [COUNT_WIDTH-1:0]           cfg_threshold_data_s0;
 
-    logic                          cfg_we_s1;
-    logic                          cfg_tw_s1;
-    logic [NP_IDX_WIDTH-1:0]       cfg_np_idx_s1;
-    logic [GROUP_WIDTH-1:0]        cfg_grp_idx_s1;
-    logic [WEIGHT_ADDR_WIDTH-1:0]  cfg_weight_local_addr_s1;
-    logic [PW-1:0]                 cfg_weight_data_s1;
-    logic [COUNT_WIDTH-1:0]        cfg_threshold_data_s1;
+    logic                             cfg_we_s1;
+    logic                             cfg_tw_s1;
+    logic [NP_IDX_WIDTH-1:0]          cfg_np_idx_s1;
+    logic [GROUP_WIDTH-1:0]           cfg_grp_idx_s1;
+    logic [WEIGHT_ADDR_WIDTH-1:0]     cfg_weight_local_addr_s1;
+    logic [PW-1:0]                    cfg_weight_data_s1;
+    logic [COUNT_WIDTH-1:0]           cfg_threshold_data_s1;
 
-    logic [NP_IDX_WIDTH-1:0]       cfg_np_idx_calc;
-    logic [GROUP_WIDTH-1:0]        cfg_grp_idx_calc;
-    logic [WEIGHT_ADDR_WIDTH-1:0]  cfg_weight_local_addr_calc;
+    logic [NP_IDX_WIDTH-1:0]          cfg_np_idx_calc;
+    logic [GROUP_WIDTH-1:0]           cfg_grp_idx_calc;
+    logic [WEIGHT_ADDR_WIDTH-1:0]     cfg_weight_local_addr_calc;
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            cfg_we_s0            <= 1'b0;
-            cfg_tw_s0            <= 1'b0;
-            cfg_neuron_idx_s0    <= '0;
-            cfg_weight_addr_s0   <= '0;
-            cfg_weight_data_s0   <= '0;
-            cfg_threshold_data_s0<= '0;
+            cfg_we_s0             <= 1'b0;
+            cfg_tw_s0             <= 1'b0;
+            cfg_neuron_idx_s0     <= '0;
+            cfg_weight_addr_s0    <= '0;
+            cfg_weight_data_s0    <= '0;
+            cfg_threshold_data_s0 <= '0;
         end else if (!busy) begin
             cfg_we_s0             <= cfg_write_en;
             cfg_tw_s0             <= cfg_threshold_write;
@@ -222,13 +222,13 @@ module bnn_layer #(
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            cfg_we_s1               <= 1'b0;
-            cfg_tw_s1               <= 1'b0;
-            cfg_np_idx_s1           <= '0;
-            cfg_grp_idx_s1          <= '0;
-            cfg_weight_local_addr_s1<= '0;
-            cfg_weight_data_s1      <= '0;
-            cfg_threshold_data_s1   <= '0;
+            cfg_we_s1                <= 1'b0;
+            cfg_tw_s1                <= 1'b0;
+            cfg_np_idx_s1            <= '0;
+            cfg_grp_idx_s1           <= '0;
+            cfg_weight_local_addr_s1 <= '0;
+            cfg_weight_data_s1       <= '0;
+            cfg_threshold_data_s1    <= '0;
         end else begin
             cfg_we_s1                <= cfg_we_s0;
             cfg_tw_s1                <= cfg_tw_s0;
@@ -296,15 +296,29 @@ module bnn_layer #(
     logic issue_last;
     logic start_group;
 
+    // Registered read-request stage to shorten beat_count -> BRAM control path
+    logic rd_req_valid_r;
+    logic rd_req_last_r;
+
     assign issue_beat = (state_r == BEAT);
     assign issue_last = (state_r == BEAT) && (beat_idx_r == LAST_BEAT_IDX);
 
     assign start_group = ((state_r == IDLE) && start) ||
                          ((state_r == WAIT_OUT) && all_np_done && !all_groups_done);
 
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            rd_req_valid_r <= 1'b0;
+            rd_req_last_r  <= 1'b0;
+        end else begin
+            rd_req_valid_r <= issue_beat;
+            rd_req_last_r  <= issue_last;
+        end
+    end
+
     //==========================================================================
     // Valid and Last Pipeline
-    // Pipeline depth = 2 cycles from issue_beat to np_valid_in:
+    // Pipeline depth = 2 cycles from rd_req_valid_r to np_valid_in:
     //   Cycle 1: RAM output registers (weight_rd_data, input_stage_r)
     //   Cycle 2: NP input registers (np_weight_in, np_input_in)
     //==========================================================================
@@ -318,8 +332,8 @@ module bnn_layer #(
             np_valid_pipe_r <= '0;
             np_last_pipe_r  <= '0;
         end else begin
-            np_valid_pipe_r <= {np_valid_pipe_r[0], issue_beat};
-            np_last_pipe_r  <= {np_last_pipe_r[0], issue_last};
+            np_valid_pipe_r <= {np_valid_pipe_r[0], rd_req_valid_r};
+            np_last_pipe_r  <= {np_last_pipe_r[0], rd_req_last_r};
         end
     end
 
@@ -329,11 +343,11 @@ module bnn_layer #(
     //==========================================================================
     // Data Pipeline Stages
     //==========================================================================
-    logic [PW-1:0]                input_stage_r;
-    logic [PW-1:0]                np_input_in;
-    logic [PW-1:0]                np_weight_in     [PN];
-    logic [COUNT_WIDTH-1:0]       np_threshold_in  [PN];
-    logic [INPUT_ADDR_WIDTH-1:0]  input_rd_addr_r;
+    logic [PW-1:0]               input_stage_r;
+    logic [PW-1:0]               np_input_in;
+    logic [PW-1:0]               np_weight_in    [PN];
+    logic [COUNT_WIDTH-1:0]      np_threshold_in [PN];
+    logic [INPUT_ADDR_WIDTH-1:0] input_rd_addr_r;
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -346,7 +360,7 @@ module bnn_layer #(
         end else begin
             input_stage_r <= input_buffer[input_rd_addr_r];
 
-            np_input_in   <= input_stage_r;
+            np_input_in <= input_stage_r;
             for (int i = 0; i < PN; i++) begin
                 np_weight_in[i]    <= np_active_r[i] ? weight_rd_data[i] : '0;
                 np_threshold_in[i] <= threshold_rd_data[i];
@@ -373,8 +387,8 @@ module bnn_layer #(
 
             always_ff @(posedge clk) begin
                 if (rst) begin
-                    next_group_base_r <= '0;
-                    weight_rd_addr[i] <= '0;
+                    next_group_base_r    <= '0;
+                    weight_rd_addr[i]    <= '0;
                     threshold_rd_addr[i] <= '0;
                 end else begin
                     if ((state_r == IDLE) && start) begin
@@ -385,7 +399,7 @@ module bnn_layer #(
                         weight_rd_addr[i]    <= next_group_base_r;
                         threshold_rd_addr[i] <= grp_sel_next;
                         next_group_base_r    <= next_group_base_r + WEIGHT_ADDR_WIDTH'(INPUT_BEATS);
-                    end else if (issue_beat) begin
+                    end else if (rd_req_valid_r) begin
                         weight_rd_addr[i] <= weight_rd_addr[i] + WEIGHT_ADDR_WIDTH'(1);
                     end
                 end
@@ -399,8 +413,8 @@ module bnn_layer #(
         end else begin
             if (start_group) begin
                 input_rd_addr_r <= '0;
-            end else if (issue_beat) begin
-                if (beat_idx_r == LAST_BEAT_IDX) begin
+            end else if (rd_req_valid_r) begin
+                if (rd_req_last_r) begin
                     input_rd_addr_r <= '0;
                 end else begin
                     input_rd_addr_r <= input_rd_addr_r + INPUT_ADDR_WIDTH'(1);
@@ -412,8 +426,8 @@ module bnn_layer #(
     //==========================================================================
     // Active Processor Mask
     //==========================================================================
-    logic [PN-1:0]           np_active_next;
-    logic [GROUP_WIDTH-1:0]  next_grp_for_mask;
+    logic [PN-1:0]          np_active_next;
+    logic [GROUP_WIDTH-1:0] next_grp_for_mask;
 
     always_comb begin
         next_grp_for_mask = group_idx_r + GROUP_WIDTH'(1);
@@ -472,8 +486,8 @@ module bnn_layer #(
     //==========================================================================
     // Output Collection
     //==========================================================================
-    logic [NEURONS-1:0]      activations_buffer;
-    logic [COUNT_WIDTH-1:0]  popcounts_buffer [NEURONS];
+    logic [NEURONS-1:0]     activations_buffer;
+    logic [COUNT_WIDTH-1:0] popcounts_buffer [NEURONS];
 
     int neuron_idx_comb [PN];
 
