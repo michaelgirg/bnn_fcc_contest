@@ -1,7 +1,7 @@
 Copyright 1986-2021 Xilinx, Inc. All Rights Reserved.
 -----------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2021.2 (lin64) Build 3367213 Tue Oct 19 02:47:39 MDT 2021
-| Date         : Thu Apr 16 11:38:53 2026
+| Date         : Sat Apr 18 00:56:22 2026
 | Host         : ece-lnx-10 running 64-bit Red Hat Enterprise Linux release 8.10 (Ootpa)
 | Command      : report_utilization -file ./outputs/post_synth_util.rpt
 | Design       : bnn_fcc_timing
@@ -36,16 +36,16 @@ Table of Contents
 +----------------------------+------+-------+------------+-----------+-------+
 |          Site Type         | Used | Fixed | Prohibited | Available | Util% |
 +----------------------------+------+-------+------------+-----------+-------+
-| CLB LUTs*                  | 3993 |     0 |          0 |   1728000 |  0.23 |
-|   LUT as Logic             | 3865 |     0 |          0 |   1728000 |  0.22 |
+| CLB LUTs*                  | 4107 |     0 |          0 |   1728000 |  0.24 |
+|   LUT as Logic             | 3979 |     0 |          0 |   1728000 |  0.23 |
 |   LUT as Memory            |  128 |     0 |          0 |    791040 |  0.02 |
 |     LUT as Distributed RAM |  128 |     0 |            |           |       |
 |     LUT as Shift Register  |    0 |     0 |            |           |       |
-| CLB Registers              | 6414 |     0 |          0 |   3456000 |  0.19 |
-|   Register as Flip Flop    | 6414 |     0 |          0 |   3456000 |  0.19 |
+| CLB Registers              | 6614 |     0 |          0 |   3456000 |  0.19 |
+|   Register as Flip Flop    | 6614 |     0 |          0 |   3456000 |  0.19 |
 |   Register as Latch        |    0 |     0 |          0 |   3456000 |  0.00 |
-| CARRY8                     |   48 |     0 |          0 |    216000 |  0.02 |
-| F7 Muxes                   |  177 |     0 |          0 |    864000 |  0.02 |
+| CARRY8                     |   50 |     0 |          0 |    216000 |  0.02 |
+| F7 Muxes                   |  153 |     0 |          0 |    864000 |  0.02 |
 | F8 Muxes                   |   48 |     0 |          0 |    432000 |  0.01 |
 | F9 Muxes                   |    0 |     0 |          0 |    216000 |  0.00 |
 +----------------------------+------+-------+------------+-----------+-------+
@@ -67,7 +67,7 @@ Table of Contents
 | 0     |          Yes |           - |          Set |
 | 0     |          Yes |           - |        Reset |
 | 6     |          Yes |         Set |            - |
-| 6408  |          Yes |       Reset |            - |
+| 6608  |          Yes |       Reset |            - |
 +-------+--------------+-------------+--------------+
 
 
@@ -77,9 +77,9 @@ Table of Contents
 +-------------------+------+-------+------------+-----------+-------+
 |     Site Type     | Used | Fixed | Prohibited | Available | Util% |
 +-------------------+------+-------+------------+-----------+-------+
-| Block RAM Tile    |   38 |     0 |          0 |      2688 |  1.41 |
-|   RAMB36/FIFO*    |   30 |     0 |          0 |      2688 |  1.12 |
-|     RAMB36E2 only |   30 |       |            |           |       |
+| Block RAM Tile    |   16 |     0 |          0 |      2688 |  0.60 |
+|   RAMB36/FIFO*    |    8 |     0 |          0 |      2688 |  0.30 |
+|     RAMB36E2 only |    8 |       |            |           |       |
 |   RAMB18          |   16 |     0 |          0 |      5376 |  0.30 |
 |     RAMB18E2 only |   16 |       |            |           |       |
 | URAM              |    0 |     0 |          0 |      1280 |  0.00 |
@@ -90,12 +90,11 @@ Table of Contents
 3. ARITHMETIC
 -------------
 
-+----------------+------+-------+------------+-----------+-------+
-|    Site Type   | Used | Fixed | Prohibited | Available | Util% |
-+----------------+------+-------+------------+-----------+-------+
-| DSPs           |    1 |     0 |          0 |     12288 | <0.01 |
-|   DSP48E2 only |    1 |       |            |           |       |
-+----------------+------+-------+------------+-----------+-------+
++-----------+------+-------+------------+-----------+-------+
+| Site Type | Used | Fixed | Prohibited | Available | Util% |
++-----------+------+-------+------------+-----------+-------+
+| DSPs      |    0 |     0 |          0 |     12288 |  0.00 |
++-----------+------+-------+------------+-----------+-------+
 
 
 4. I/O
@@ -164,22 +163,21 @@ Table of Contents
 +----------+------+---------------------+
 | Ref Name | Used | Functional Category |
 +----------+------+---------------------+
-| FDRE     | 6408 |            Register |
-| LUT5     | 1282 |                 CLB |
-| LUT6     | 1203 |                 CLB |
-| LUT4     |  576 |                 CLB |
-| LUT2     |  571 |                 CLB |
-| LUT3     |  325 |                 CLB |
+| FDRE     | 6608 |            Register |
+| LUT6     | 1667 |                 CLB |
+| LUT5     |  783 |                 CLB |
+| LUT4     |  666 |                 CLB |
+| LUT2     |  539 |                 CLB |
+| LUT3     |  421 |                 CLB |
 | RAMD32   |  224 |                 CLB |
-| MUXF7    |  177 |                 CLB |
-| LUT1     |   74 |                 CLB |
+| MUXF7    |  153 |                 CLB |
+| LUT1     |   64 |                 CLB |
+| CARRY8   |   50 |                 CLB |
 | MUXF8    |   48 |                 CLB |
-| CARRY8   |   48 |                 CLB |
 | RAMS32   |   32 |                 CLB |
-| RAMB36E2 |   30 |            BLOCKRAM |
 | RAMB18E2 |   16 |            BLOCKRAM |
+| RAMB36E2 |    8 |            BLOCKRAM |
 | FDSE     |    6 |            Register |
-| DSP48E2  |    1 |          Arithmetic |
 +----------+------+---------------------+
 
 
