@@ -79,7 +79,13 @@ module config_manager_multi #(
 
     logic [CONFIG_BUS_WIDTH-1:0] beat_data_q;
     logic [CFG_KEEP_W-1:0]       beat_keep_q;
-    logic [BEAT_PTR_W-1:0]       beat_ptr_q;
+
+    // Duplicated beat pointer registers to split fanout:
+    // - beat_ptr_data_q drives byte extraction
+    // - beat_ptr_ctrl_q drives control/FSM/advance logic
+    (* DONT_TOUCH = "TRUE" *) logic [BEAT_PTR_W-1:0] beat_ptr_data_q;
+    (* DONT_TOUCH = "TRUE" *) logic [BEAT_PTR_W-1:0] beat_ptr_ctrl_q;
+
     logic                        beat_empty_q;
 
     logic [7:0]  byte_out;
@@ -112,30 +118,34 @@ module config_manager_multi #(
         else $fatal(1, "CONFIG_BUS_WIDTH must be a multiple of 8");
     end
 
-    assign byte_out   = beat_data_q[8*beat_ptr_q +: 8];
-    assign byte_valid = (!beat_empty_q) && beat_keep_q[beat_ptr_q];
+    assign byte_out   = beat_data_q[8*beat_ptr_data_q +: 8];
+    assign byte_valid = (!beat_empty_q) && beat_keep_q[beat_ptr_ctrl_q];
     assign cfg_ready  = beat_empty_q;
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            beat_data_q  <= '0;
-            beat_keep_q  <= '0;
-            beat_ptr_q   <= '0;
-            beat_empty_q <= 1'b1;
+            beat_data_q      <= '0;
+            beat_keep_q      <= '0;
+            beat_ptr_data_q  <= '0;
+            beat_ptr_ctrl_q  <= '0;
+            beat_empty_q     <= 1'b1;
         end else begin
             if (beat_empty_q) begin
                 if (cfg_valid) begin
-                    beat_data_q  <= cfg_data;
-                    beat_keep_q  <= cfg_keep;
-                    beat_ptr_q   <= '0;
-                    beat_empty_q <= (cfg_keep == '0);
+                    beat_data_q      <= cfg_data;
+                    beat_keep_q      <= cfg_keep;
+                    beat_ptr_data_q  <= '0;
+                    beat_ptr_ctrl_q  <= '0;
+                    beat_empty_q     <= (cfg_keep == '0);
                 end
             end else begin
-                if (!beat_keep_q[beat_ptr_q] || byte_rd_en) begin
-                    if (beat_ptr_q == CFG_KEEP_W-1)
+                if (!beat_keep_q[beat_ptr_ctrl_q] || byte_rd_en) begin
+                    if (beat_ptr_ctrl_q == CFG_KEEP_W-1) begin
                         beat_empty_q <= 1'b1;
-                    else
-                        beat_ptr_q <= beat_ptr_q + 1'b1;
+                    end else begin
+                        beat_ptr_data_q <= beat_ptr_data_q + BEAT_PTR_W'(1);
+                        beat_ptr_ctrl_q <= beat_ptr_ctrl_q + BEAT_PTR_W'(1);
+                    end
                 end
             end
         end
