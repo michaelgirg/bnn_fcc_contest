@@ -130,15 +130,14 @@ module bnn_layer #(
     //==========================================================================
     // State and Control Signals
     //==========================================================================
-    state_t                        state_r;
-    logic   [     GROUP_WIDTH-1:0] group_idx_r;
-    logic   [INPUT_ADDR_WIDTH-1:0] beat_idx_r;
-    logic   [              PN-1:0] np_active_r;
-    logic                          done_r;
-    logic                          output_valid_r;
-    logic                          collect_done;
-    logic                          all_groups_done;
-    logic                          all_np_done;
+    state_t                      state_r;
+    logic [GROUP_WIDTH-1:0]      group_idx_r;
+    logic [INPUT_ADDR_WIDTH-1:0] beat_idx_r;
+    logic                        done_r;
+    logic                        output_valid_r;
+    logic                        collect_done;
+    logic                        all_groups_done;
+    logic                        all_np_done;
 
     assign all_groups_done = (group_idx_r == LAST_GROUP_IDX);
 
@@ -160,8 +159,6 @@ module bnn_layer #(
 
     //==========================================================================
     // Configuration Write Pipeline
-    // Stage 0: capture incoming config transaction
-    // Stage 1: decode processor/group/local address
     //==========================================================================
     logic                             cfg_we_s0;
     logic                             cfg_tw_s0;
@@ -296,7 +293,6 @@ module bnn_layer #(
     logic issue_last;
     logic start_group;
 
-    // Registered read-request stage to shorten beat_count -> BRAM control path
     logic rd_req_valid_r;
     logic rd_req_last_r;
 
@@ -318,9 +314,6 @@ module bnn_layer #(
 
     //==========================================================================
     // Valid and Last Pipeline
-    // Pipeline depth = 2 cycles from rd_req_valid_r to np_valid_in:
-    //   Cycle 1: RAM output registers (weight_rd_data, input_stage_r)
-    //   Cycle 2: NP input registers (np_weight_in, np_input_in)
     //==========================================================================
     logic [1:0] np_valid_pipe_r;
     logic [1:0] np_last_pipe_r;
@@ -341,13 +334,27 @@ module bnn_layer #(
     assign np_last     = np_last_pipe_r[1];
 
     //==========================================================================
+    // Fanout-reduced duplicated registers
+    //==========================================================================
+    (* DONT_TOUCH = "TRUE" *) logic [INPUT_ADDR_WIDTH-1:0] input_rd_addr_ctrl_r;
+    (* DONT_TOUCH = "TRUE" *) logic [INPUT_ADDR_WIDTH-1:0] input_rd_addr_data_r;
+
+    (* DONT_TOUCH = "TRUE" *) logic [PN-1:0] np_active_ctrl_r;
+    (* DONT_TOUCH = "TRUE" *) logic [PN-1:0] np_active_np_r;
+    (* DONT_TOUCH = "TRUE" *) logic [PN-1:0] np_active_collect_r;
+
+    logic [PN-1:0] np_active_next;
+    logic [PN-1:0] np_active_init;
+
+    assign np_active_init = (NEURONS >= PN) ? {PN{1'b1}} : LAST_GROUP_MASK;
+
+    //==========================================================================
     // Data Pipeline Stages
     //==========================================================================
-    logic [PW-1:0]               input_stage_r;
-    logic [PW-1:0]               np_input_in;
-    logic [PW-1:0]               np_weight_in    [PN];
-    logic [COUNT_WIDTH-1:0]      np_threshold_in [PN];
-    logic [INPUT_ADDR_WIDTH-1:0] input_rd_addr_r;
+    logic [PW-1:0]          input_stage_r;
+    logic [PW-1:0]          np_input_in;
+    logic [PW-1:0]          np_weight_in    [PN];
+    logic [COUNT_WIDTH-1:0] np_threshold_in [PN];
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -358,11 +365,11 @@ module bnn_layer #(
                 np_threshold_in[i] <= '0;
             end
         end else begin
-            input_stage_r <= input_buffer[input_rd_addr_r];
+            input_stage_r <= input_buffer[input_rd_addr_data_r];
+            np_input_in   <= input_stage_r;
 
-            np_input_in <= input_stage_r;
             for (int i = 0; i < PN; i++) begin
-                np_weight_in[i]    <= np_active_r[i] ? weight_rd_data[i] : '0;
+                np_weight_in[i]    <= weight_rd_data[i];
                 np_threshold_in[i] <= threshold_rd_data[i];
             end
         end
@@ -409,15 +416,19 @@ module bnn_layer #(
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            input_rd_addr_r <= '0;
+            input_rd_addr_ctrl_r <= '0;
+            input_rd_addr_data_r <= '0;
         end else begin
             if (start_group) begin
-                input_rd_addr_r <= '0;
+                input_rd_addr_ctrl_r <= '0;
+                input_rd_addr_data_r <= '0;
             end else if (rd_req_valid_r) begin
                 if (rd_req_last_r) begin
-                    input_rd_addr_r <= '0;
+                    input_rd_addr_ctrl_r <= '0;
+                    input_rd_addr_data_r <= '0;
                 end else begin
-                    input_rd_addr_r <= input_rd_addr_r + INPUT_ADDR_WIDTH'(1);
+                    input_rd_addr_ctrl_r <= input_rd_addr_ctrl_r + INPUT_ADDR_WIDTH'(1);
+                    input_rd_addr_data_r <= input_rd_addr_data_r + INPUT_ADDR_WIDTH'(1);
                 end
             end
         end
@@ -426,7 +437,6 @@ module bnn_layer #(
     //==========================================================================
     // Active Processor Mask
     //==========================================================================
-    logic [PN-1:0]          np_active_next;
     logic [GROUP_WIDTH-1:0] next_grp_for_mask;
 
     always_comb begin
@@ -441,14 +451,22 @@ module bnn_layer #(
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            np_active_r <= '0;
+            np_active_ctrl_r    <= '0;
+            np_active_np_r      <= '0;
+            np_active_collect_r <= '0;
         end else begin
             if ((state_r == IDLE) && start) begin
-                np_active_r <= (NEURONS >= PN) ? {PN{1'b1}} : LAST_GROUP_MASK;
+                np_active_ctrl_r    <= np_active_init;
+                np_active_np_r      <= np_active_init;
+                np_active_collect_r <= np_active_init;
             end else if ((state_r == WAIT_OUT) && all_np_done && !all_groups_done) begin
-                np_active_r <= np_active_next;
+                np_active_ctrl_r    <= np_active_next;
+                np_active_np_r      <= np_active_next;
+                np_active_collect_r <= np_active_next;
             end else if (state_r == IDLE && !start) begin
-                np_active_r <= '0;
+                np_active_ctrl_r    <= '0;
+                np_active_np_r      <= '0;
+                np_active_collect_r <= '0;
             end
         end
     end
@@ -460,7 +478,7 @@ module bnn_layer #(
     logic [PN-1:0]          np_activation;
     logic [COUNT_WIDTH-1:0] np_popcount [PN];
 
-    assign all_np_done = &(np_valid_out | ~np_active_r);
+    assign all_np_done = &(np_valid_out | ~np_active_ctrl_r);
 
     generate
         for (genvar i = 0; i < PN; i++) begin : gen_nps
@@ -471,7 +489,7 @@ module bnn_layer #(
             ) u_np (
                 .clk         (clk),
                 .rst         (rst),
-                .valid_in    (np_valid_in && np_active_r[i]),
+                .valid_in    (np_valid_in && np_active_np_r[i]),
                 .last        (np_last),
                 .x           (np_input_in),
                 .w           (np_weight_in[i]),
@@ -510,7 +528,7 @@ module bnn_layer #(
                 popcounts_buffer   <= '{default: '0};
             end else if ((state_r == WAIT_OUT) && all_np_done) begin
                 for (int i = 0; i < PN; i++) begin
-                    if (np_valid_out[i] && np_active_r[i]) begin
+                    if (np_valid_out[i] && np_active_collect_r[i]) begin
                         if (neuron_idx_comb[i] < NEURONS) begin
                             popcounts_buffer[neuron_idx_comb[i]] <= np_popcount[i];
                             if (OUTPUT_LAYER) begin
