@@ -1,0 +1,182 @@
+QuestaSim-64 qrun 2023.3 Utility 2023.07 Jul 17 2023
+Start time: 01:16:20 on Apr 18,2026
+qrun -64 -sv -timescale=1ns/100ps -g USE_CUSTOM_TOPOLOGY=0 -g TOGGLE_DATA_OUT_READY=1 -g CONFIG_VALID_PROBABILITY=0.8 -g DATA_IN_VALID_PROBABILITY=0.8 -g INPUT_DATA_WIDTH=8 -g INPUT_BUS_WIDTH=64 -g CONFIG_BUS_WIDTH=64 -g OUTPUT_DATA_WIDTH=4 -g OUTPUT_BUS_WIDTH=8 -g TOTAL_LAYERS=4 -g BASE_DIR=../../python /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/bnn_fcc.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/verification/axi4_stream_if.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/verification/bnn_fcc_tb_pkg.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/verification/bnn_fcc_tb.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/openflex/rtl/bnn_fcc_timing.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/bnn_core.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/bnn_layer.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/neuron_processor.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/popcount_tree.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/argmax.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/input_binarize.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/config_manager_multi.sv -top bnn_fcc_tb 
+QuestaSim-64 vlog 2023.3 Compiler 2023.07 Jul 17 2023
+Start time: 01:16:20 on Apr 18,2026
+vlog -64 -sv -timescale=1ns/100ps /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/bnn_fcc.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/verification/axi4_stream_if.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/verification/bnn_fcc_tb_pkg.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/verification/bnn_fcc_tb.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/openflex/rtl/bnn_fcc_timing.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/bnn_core.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/bnn_layer.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/neuron_processor.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/popcount_tree.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/argmax.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/input_binarize.sv /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/rtl/config_manager_multi.sv -work qrun.out/work -statslog qrun.out/stats_log -writesessionid "+qrun.out/top_dus" -csession=incr -csessionid=3 
+-- Compiling module bnn_fcc
+-- Compiling interface axi4_stream_if
+-- Compiling package bnn_fcc_tb_pkg
+-- Compiling module bnn_fcc_tb
+-- Importing package bnn_fcc_tb_pkg
+-- Compiling module bnn_fcc_timing
+-- Compiling module bnn_core
+-- Compiling module weight_bank
+-- Compiling module threshold_bank
+-- Compiling module bnn_layer
+-- Compiling module neuron_processor
+-- Compiling module popcount_tree
+-- Compiling module argmax
+-- Compiling module input_binarize
+-- Compiling module config_manager_multi
+
+Top level modules:
+	bnn_fcc_tb
+	bnn_fcc_timing
+	popcount_tree
+End time: 01:16:21 on Apr 18,2026, Elapsed time: 0:00:01
+Errors: 0, Warnings: 0
+QuestaSim-64 vopt 2023.3 Compiler 2023.07 Jul 17 2023
+Start time: 01:16:21 on Apr 18,2026
+vopt -timescale=1ns/100ps -g USE_CUSTOM_TOPOLOGY=0 -g TOGGLE_DATA_OUT_READY=1 -g CONFIG_VALID_PROBABILITY=0.8 -g DATA_IN_VALID_PROBABILITY=0.8 -g INPUT_DATA_WIDTH=8 -g INPUT_BUS_WIDTH=64 -g CONFIG_BUS_WIDTH=64 -g OUTPUT_DATA_WIDTH=4 -g OUTPUT_BUS_WIDTH=8 -g TOTAL_LAYERS=4 -g BASE_DIR=../../python bnn_fcc_tb -work qrun.out/work -statslog qrun.out/stats_log -o qrun_opt -csession=incr -csessionid=1 
+
+Top level modules:
+	bnn_fcc_tb
+
+Analyzing design...
+-- Loading module bnn_fcc_tb
+-- Importing package bnn_fcc_tb_pkg
+-- Loading interface axi4_stream_if
+-- Loading module bnn_fcc
+-- Loading module config_manager_multi
+-- Loading module input_binarize
+-- Loading module bnn_core
+-- Loading module bnn_layer
+-- Loading module argmax
+-- Loading module weight_bank
+-- Loading module threshold_bank
+-- Loading module neuron_processor
+Optimizing 22 design-units (inlining 83/84 module instances):
+** Warning: (vopt-3040) Command line generic/parameter "TOTAL_LAYERS" not found in design.
+-- Optimizing package bnn_fcc_tb_pkg(fast)
+-- Inlining interface axi4_stream_if(fast__1)
+-- Inlining interface axi4_stream_if(fast__2)
+-- Inlining module config_manager_multi(fast)
+-- Inlining module input_binarize(fast)
+-- Inlining module weight_bank(fast)
+-- Inlining module threshold_bank(fast)
+-- Inlining module neuron_processor(fast)
+-- Inlining module bnn_layer(fast)
+-- Inlining module weight_bank(fast__1)
+-- Inlining module threshold_bank(fast__1)
+-- Inlining module neuron_processor(fast__1)
+-- Inlining module bnn_layer(fast__1)
+-- Inlining module weight_bank(fast__2)
+-- Inlining module threshold_bank(fast__2)
+-- Inlining module neuron_processor(fast__2)
+-- Inlining module bnn_layer(fast__2)
+-- Inlining module bnn_core(fast)
+-- Inlining module argmax(fast)
+-- Inlining module bnn_fcc(fast)
+-- Optimizing module bnn_fcc_tb(fast)
+-- Optimizing interface axi4_stream_if(fast)
+Optimized design name is qrun_opt
+End time: 01:16:21 on Apr 18,2026, Elapsed time: 0:00:00
+Errors: 0, Warnings: 1
+Reading pref.tcl
+
+# 2023.3
+
+# vsim -64 -lib qrun.out/work -c -do "run -all; quit -f" -statslog qrun.out/stats_log qrun_opt -appendlog -l qrun.log -csession=incr -csessionid=4 
+# Start time: 01:16:22 on Apr 18,2026
+# //  Questa Sim-64
+# //  Version 2023.3 linux_x86_64 Jul 17 2023
+# //
+# //  Copyright 1991-2023 Mentor Graphics Corporation
+# //  All Rights Reserved.
+# //
+# //  QuestaSim and its associated documentation contain trade
+# //  secrets and commercial or financial information that are the property of
+# //  Mentor Graphics Corporation and are privileged, confidential,
+# //  and exempt from disclosure under the Freedom of Information Act,
+# //  5 U.S.C. Section 552. Furthermore, this information
+# //  is prohibited from disclosure under the Trade Secrets Act,
+# //  18 U.S.C. Section 1905.
+# //
+# Loading sv_std.std
+# Loading work.bnn_fcc_tb_pkg(fast)
+# Loading work.bnn_fcc_tb(fast)
+# run -all
+# --- Loading Trained Model ---
+# BNN_FCC_Stimulus: Loaded 100 vectors from ../../python/test_vectors/inputs.hex
+# SV model successfully verified.
+# --- Configuration created: 4466 words (64-bit wide) ---
+# --- Loading Test Vectors ---
+# BNN_FCC_Stimulus: Loaded 50 vectors from ../../python/test_vectors/inputs.hex
+# BNN Model: 3 Layers, 784 Inputs
+#   Layer 0 (hidden): 256 Neurons
+#   Layer 1 (hidden): 256 Neurons
+#   Layer 2 (output): 10 Neurons
+# [95 ns] Streaming weights and thresholds.
+# [709155 ns] Streaming image 0.
+# [710345 ns] Streaming image 1.
+# [711615 ns] Streaming image 2.
+# [757905 ns] Streaming image 3.
+# [804375 ns] Streaming image 4.
+# [850705 ns] Streaming image 5.
+# [897075 ns] Streaming image 6.
+# [943535 ns] Streaming image 7.
+# [989925 ns] Streaming image 8.
+# [1036345 ns] Streaming image 9.
+# [1082845 ns] Streaming image 10.
+# [1129155 ns] Streaming image 11.
+# [1175515 ns] Streaming image 12.
+# [1221965 ns] Streaming image 13.
+# [1268185 ns] Streaming image 14.
+# [1314665 ns] Streaming image 15.
+# [1360945 ns] Streaming image 16.
+# [1407435 ns] Streaming image 17.
+# [1453915 ns] Streaming image 18.
+# [1500155 ns] Streaming image 19.
+# [1546625 ns] Streaming image 20.
+# [1592945 ns] Streaming image 21.
+# [1639365 ns] Streaming image 22.
+# [1685735 ns] Streaming image 23.
+# [1732145 ns] Streaming image 24.
+# [1778535 ns] Streaming image 25.
+# [1825025 ns] Streaming image 26.
+# [1871415 ns] Streaming image 27.
+# [1917655 ns] Streaming image 28.
+# [1964085 ns] Streaming image 29.
+# [2010535 ns] Streaming image 30.
+# [2056825 ns] Streaming image 31.
+# [2103315 ns] Streaming image 32.
+# [2149655 ns] Streaming image 33.
+# [2196075 ns] Streaming image 34.
+# [2242445 ns] Streaming image 35.
+# [2288805 ns] Streaming image 36.
+# [2335195 ns] Streaming image 37.
+# [2381595 ns] Streaming image 38.
+# [2427985 ns] Streaming image 39.
+# [2474325 ns] Streaming image 40.
+# [2520815 ns] Streaming image 41.
+# [2567275 ns] Streaming image 42.
+# [2613615 ns] Streaming image 43.
+# [2659925 ns] Streaming image 44.
+# [2706385 ns] Streaming image 45.
+# [2752705 ns] Streaming image 46.
+# [2799125 ns] Streaming image 47.
+# [2845545 ns] Streaming image 48.
+# [2891965 ns] Streaming image 49.
+# [2938255 ns] All images loaded, waiting for outputs.
+# [3029905 ns] SUCCESS: all 50 tests completed successfully.
+# 
+# Stats:
+# Avg latency (cycles) per image: 9185.3 cycles
+# Avg latency (time) per image: 91853.0 ns
+# Avg throughput (outputs/sec): 21545.4
+# Avg throughput (cycles/output): 4641.4
+#  quit -f
+# End time: 01:16:24 on Apr 18,2026, Elapsed time: 0:00:02
+# Errors: 0, Warnings: 0
+# *** Summary *********************************************
+#     qrun: Errors:   0, Warnings:   0
+#     vlog: Errors:   0, Warnings:   0
+#     vopt: Errors:   0, Warnings:   1
+#     vsim: Errors:   0, Warnings:   0
+#   Totals: Errors:   0, Warnings:   1
+
+
+----------------------------------------------------------------------
+    RUNNING TEST: build_bnn_fcc_tb_USE_CUSTOM_TOPOLOGY_0_TOGGLE_DATA_OUT_READY_1_CONFIG_VALID_PROBABILITY_0.8_DATA_IN_VALID_PROBABILITY_0.8_INPUT_DATA_WIDTH_8_INPUT_BUS_WIDTH_64_CONFIG_BUS_WIDTH_64_OUTPUT_DATA_WIDTH_4_OUTPUT_BUS_WIDTH_8_TOTAL_LAYERS_4_BASE_DIR_../../python
+----------------------------------------------------------------------
