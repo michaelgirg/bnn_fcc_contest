@@ -2,12 +2,12 @@
 # Vivado v2021.2 (64-bit)
 # SW Build 3367213 on Tue Oct 19 02:47:39 MDT 2021
 # IP Build 3369179 on Thu Oct 21 08:25:16 MDT 2021
-# Start of session at: Thu Apr 16 11:35:39 2026
-# Process ID: 1656399
-# Current directory: /ecel/UFAD/mgirgis1/Documents/RC2/bnn/bnn_fcc_contest/openflex/build_vivado
-# Command line: vivado -mode batch -source /home/UFAD/mgirgis1/envs/openflex/lib64/python3.6/site-packages/openflex/tcl/vivado_flow.tcl -tclargs bnn_fcc_timing XCU250-FIGD2104-2L-E 1.0
-# Log file: /ecel/UFAD/mgirgis1/Documents/RC2/bnn/bnn_fcc_contest/openflex/build_vivado/vivado.log
-# Journal file: /ecel/UFAD/mgirgis1/Documents/RC2/bnn/bnn_fcc_contest/openflex/build_vivado/vivado.jou
+# Start of session at: Sat Apr 18 00:52:44 2026
+# Process ID: 3777988
+# Current directory: /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/openflex/build_vivado
+# Command line: vivado -mode batch -source /home/UFAD/nbattieste/envs/openflex/lib64/python3.6/site-packages/openflex/tcl/vivado_flow.tcl -tclargs bnn_fcc_timing XCU250-FIGD2104-2L-E 1.0
+# Log file: /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/openflex/build_vivado/vivado.log
+# Journal file: /ecel/UFAD/nbattieste/Documents/bnn_fcc_contest/openflex/build_vivado/vivado.jou
 # Running On: ece-lnx-10, OS: Linux, CPU Frequency: 3192.499 MHz, CPU Physical cores: 24, Host memory: 100809 MB
 #-----------------------------------------------------------
-source /home/UFAD/mgirgis1/envs/openflex/lib64/python3.6/site-packages/openflex/tcl/vivado_flow.tcl
+source /home/UFAD/nbattieste/envs/openflex/lib64/python3.6/site-packages/openflex/tcl/vivado_flow.tcl

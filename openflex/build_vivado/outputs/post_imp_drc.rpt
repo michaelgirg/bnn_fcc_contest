@@ -1,7 +1,7 @@
 Copyright 1986-2021 Xilinx, Inc. All Rights Reserved.
 -----------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2021.2 (lin64) Build 3367213 Tue Oct 19 02:47:39 MDT 2021
-| Date         : Thu Apr 16 11:45:53 2026
+| Date         : Sat Apr 18 01:03:42 2026
 | Host         : ece-lnx-10 running 64-bit Red Hat Enterprise Linux release 8.10 (Ootpa)
 | Command      : report_drc -file ./outputs/post_imp_drc.rpt
 | Design       : bnn_fcc_timing
@@ -24,36 +24,19 @@ Table of Contents
       Design limits: <entire design considered>
            Ruledeck: default
              Max violations: <unlimited>
-             Violations found: 4
-+-----------+----------+------------------------+------------+
-| Rule      | Severity | Description            | Violations |
-+-----------+----------+------------------------+------------+
-| DPIP-2    | Warning  | Input pipelining       | 1          |
-| DPOP-3    | Warning  | PREG Output pipelining | 1          |
-| DPOP-4    | Warning  | MREG Output pipelining | 1          |
-| RTSTAT-10 | Warning  | No routable loads      | 1          |
-+-----------+----------+------------------------+------------+
+             Violations found: 1
++-----------+----------+-------------------+------------+
+| Rule      | Severity | Description       | Violations |
++-----------+----------+-------------------+------------+
+| RTSTAT-10 | Warning  | No routable loads | 1          |
++-----------+----------+-------------------+------------+
 
 2. REPORT DETAILS
 -----------------
-DPIP-2#1 Warning
-Input pipelining  
-DSP DUT/u_bnn_core/layer1/cfg_weight_local_addr input DUT/u_bnn_core/layer1/cfg_weight_local_addr/A[29:0] is not pipelined. Pipelining DSP48 input will improve performance.
-Related violations: <none>
-
-DPOP-3#1 Warning
-PREG Output pipelining  
-DSP DUT/u_bnn_core/layer1/cfg_weight_local_addr output DUT/u_bnn_core/layer1/cfg_weight_local_addr/P[47:0] is not pipelined (PREG=0). Pipelining the DSP48 output will improve performance and often saves power so it is suggested whenever possible to fully pipeline this function.  If this DSP48 function was inferred, it is suggested to describe an additional register stage after this function.  If the DSP48 was instantiated in the design, it is suggested to set the PREG attribute to 1.
-Related violations: <none>
-
-DPOP-4#1 Warning
-MREG Output pipelining  
-DSP DUT/u_bnn_core/layer1/cfg_weight_local_addr multiplier stage DUT/u_bnn_core/layer1/cfg_weight_local_addr/P[47:0] is not pipelined (MREG=0). Pipelining the multiplier function will improve performance and will save significant power so it is suggested whenever possible to fully pipeline this function.  If this multiplier was inferred, it is suggested to describe an additional register stage after this function.  If there is no registered adder/accumulator following the multiply function, two pipeline stages are suggested to allow both the MREG and PREG registers to be used.  If the DSP48 was instantiated in the design, it is suggested to set both the MREG and PREG attributes to 1 when performing multiply functions.
-Related violations: <none>
-
 RTSTAT-10#1 Warning
 No routable loads  
-7 net(s) have no routable loads. The problem bus(es) and/or net(s) are config_ready, data_in_ready, data_out_data[3:0], data_out_valid.
+8 net(s) have no routable loads. The problem bus(es) and/or net(s) are DUT/u_bnn_core/valid_out_r_rep_i_1__0_n_0, config_ready, data_in_ready,
+data_out_data[3:0], data_out_valid.
 Related violations: <none>
 
 
