@@ -16,6 +16,16 @@ files:
   - ../verification/bnn_fcc_tb_pkg.sv
   - ../verification/bnn_fcc_tb.sv
 
+    - ../rtl/bnn_fcc.sv
+  - rtl/bnn_fcc_timing.sv
+  - ../rtl/bnn_core.sv
+  - ../rtl/bnn_layer.sv
+  - ../rtl/neuron_processor.sv
+  - ../rtl/popcount_tree.sv
+  - ../rtl/argmax.sv
+  - ../rtl/input_binarize.sv
+  - ../rtl/config_manager_multi.sv
+
 parameters:
   USE_CUSTOM_TOPOLOGY: [0]
   TOGGLE_DATA_OUT_READY: [1]
