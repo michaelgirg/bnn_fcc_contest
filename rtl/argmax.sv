@@ -1,6 +1,5 @@
 //==============================================================================
 // Argmax Module - Pipelined tree-based comparator for output layer
-// FIXED: Stage 1 compares incoming data, not stale registered data
 //==============================================================================
 module argmax #(
     parameter  int OUTPUTS = 10,

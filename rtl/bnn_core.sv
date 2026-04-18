@@ -1,6 +1,6 @@
 `default_nettype none
 // =============================================================================
-// Module: bnn_core (CORRECTED: Fixed start pulse generation)
+// Module: bnn_core
 // =============================================================================
 module bnn_core #(
     parameter int INPUTS  = 784,
