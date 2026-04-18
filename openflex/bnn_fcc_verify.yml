@@ -16,7 +16,6 @@ files:
   - ../verification/bnn_fcc_tb_pkg.sv
   - ../verification/bnn_fcc_tb.sv
 
-    - ../rtl/bnn_fcc.sv
   - rtl/bnn_fcc_timing.sv
   - ../rtl/bnn_core.sv
   - ../rtl/bnn_layer.sv
